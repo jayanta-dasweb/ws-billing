@@ -63,7 +63,11 @@ export class StockReservationService {
 
     await this.redis.syncPendingQty(batchId, Number(batch.pendingQty));
     await this.redis.trackBillReservation(billId, batchId, qty);
-    await this.broadcast(batchId, productId, batch, { billId, counterId, lineQtyHint });
+    await this.broadcast(batchId, productId, batch, {
+      billId,
+      counterId,
+      shortageQty: 0,
+    });
     return batch;
   }
 

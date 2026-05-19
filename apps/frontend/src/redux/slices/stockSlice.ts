@@ -54,7 +54,8 @@ const stockSlice = createSlice({
           counterName: p.counterName,
           updatedAt: p.updatedAt ?? new Date().toISOString(),
         };
-      } else {
+      } else if (p.billId && p.lineId) {
+        // Only clear a specific line shortage — pool refresh must not wipe other counters' alerts.
         delete state.batchShortageAlerts[key];
       }
     },

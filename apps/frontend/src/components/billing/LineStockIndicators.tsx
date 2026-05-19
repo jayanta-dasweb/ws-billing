@@ -148,6 +148,9 @@ export function lineItemHasShortage(
   scope?: { billId?: string | null; lineId?: string; batchId?: string },
   allAlerts?: Record<string, BatchShortageAlert>,
 ): boolean {
+  if (item.shortageQty != null && item.shortageQty > 0.001) {
+    return true;
+  }
   if (scope?.batchId && allAlerts && anyBatchShortage(allAlerts, scope.batchId)) {
     return true;
   }

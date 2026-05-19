@@ -455,7 +455,7 @@ export class BillingService {
 
     const batch = await this.resolveBatch(product.id, qty, dto.batchId);
     if (!batch) {
-      throw new BadRequestException(`Insufficient stock for ${product.name}`);
+      throw new BadRequestException(`No stock available for ${product.name}`);
     }
 
     return this.appendBillLine(billId, bill, product, batch, qty, user);
@@ -477,7 +477,7 @@ export class BillingService {
 
     const batch = await this.resolveBatch(product.id, qty);
     if (!batch) {
-      throw new BadRequestException(`Insufficient stock for ${product.name}`);
+      throw new BadRequestException(`No stock available for ${product.name}`);
     }
 
     return this.appendBillLine(billId, bill, product, batch, qty, user);
@@ -531,16 +531,37 @@ export class BillingService {
       sgstPercent,
     });
 
-    await this.reservations.reserve(
-      batch.id,
-      billId,
-      product.id,
-      qty,
-      bill.counterId,
-      qty,
-    );
+    const counter = await this.prisma.counter.findUnique({
+      where: { id: bill.counterId },
+      select: { name: true },
+    });
+    const counterName = counter?.name ?? 'Counter';
 
-    await this.prisma.billItem.create({
+    let reservedForLine = 0;
+    try {
+      await this.reservations.reserve(
+        batch.id,
+        billId,
+        product.id,
+        qty,
+        bill.counterId,
+        qty,
+      );
+      reservedForLine = qty;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes('Insufficient stock')) throw e;
+      reservedForLine = await this.reservations.reserveAvailable(
+        batch.id,
+        billId,
+        product.id,
+        bill.counterId,
+        qty,
+        { counterName },
+      );
+    }
+
+    const created = await this.prisma.billItem.create({
       data: {
         billId,
         productId: product.id,
@@ -558,6 +579,16 @@ export class BillingService {
     });
 
     await this.recalcBill(billId);
+
+    await this.reservations.publishLineStockState(batch.id, product.id, {
+      billId,
+      lineId: created.id,
+      counterId: bill.counterId,
+      counterName,
+      lineQty: qty,
+      reservedForLine,
+    });
+
     return this.getBill(billId, user);
   }
 
@@ -992,7 +1023,7 @@ export class BillingService {
     return (
       batches.find((b) => {
         if (blockExpired && b.expiryDate && b.expiryDate < now) return false;
-        return Number(b.stockQty) - Number(b.pendingQty) >= qty;
+        return Number(b.stockQty) - Number(b.pendingQty) > 0.001;
       }) ?? null
     );
   }
@@ -1058,6 +1089,7 @@ export class BillingService {
     return newMaster;
   }
 
+  /** Pick a batch with free stock; allows qty above pool (shortage handled on reserve). */
   private async resolveBatch(productId: string, qty: number, batchId?: string) {
     if (batchId) {
       const batch = await this.prisma.batchStock.findFirst({
@@ -1066,9 +1098,9 @@ export class BillingService {
       if (!batch) throw new NotFoundException('Batch not found for this product');
       this.assertBatchSellable(batch);
       const available = Number(batch.stockQty) - Number(batch.pendingQty);
-      if (available + 0.0001 < qty) {
+      if (available <= 0.001) {
         throw new BadRequestException(
-          `Insufficient stock in batch ${batch.batchNumber} (available ${available})`,
+          `No stock available in batch ${batch.batchNumber}`,
         );
       }
       return batch;
