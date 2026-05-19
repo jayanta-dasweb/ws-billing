@@ -1,28 +1,6 @@
 import { PermissionCode, UserRole } from '@billing/shared';
 import type { AuthUser } from '@/redux/slices/authSlice';
-
-function isAdminUser(user: Pick<AuthUser, 'role' | 'roleKey'>): boolean {
-  switch (user.roleKey) {
-    case 'super_admin':
-    case 'admin':
-      return true;
-    default:
-      return user.role === UserRole.SUPER_ADMIN || user.role === UserRole.ADMIN;
-  }
-}
-
-function getEffectiveRole(user: Pick<AuthUser, 'role' | 'roleKey'>): UserRole {
-  switch (user.roleKey) {
-    case 'super_admin':
-      return UserRole.SUPER_ADMIN;
-    case 'admin':
-      return UserRole.ADMIN;
-    case 'cashier':
-      return UserRole.CASHIER;
-    default:
-      return user.role;
-  }
-}
+import { getEffectiveRole, isAdminUser } from '@/utils/role-utils';
 
 /** Customer master perms are for billing search only — not the admin masters area. */
 function isAdminMasterPermission(code: string): boolean {

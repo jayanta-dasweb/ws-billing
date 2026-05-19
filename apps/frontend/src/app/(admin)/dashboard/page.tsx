@@ -7,7 +7,8 @@ import { useGetDaySummaryQuery } from '@/services/api/reportsApi';
 import type { RootState } from '@/redux/store';
 import { StaffHomeDashboard } from '@/components/admin/StaffHomeDashboard';
 import { hasNonCounterAccess } from '@/utils/permissions';
-import { getEffectiveRole, getRoleLabel, isAdminUser } from '@/utils/roles';
+import { getRoleLabel } from '@/utils/roles';
+import { getEffectiveRole, isAdminUser } from '@/utils/role-utils';
 
 function formatMoney(n: number) {
   return new Intl.NumberFormat('en-IN', {

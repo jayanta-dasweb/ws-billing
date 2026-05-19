@@ -8,7 +8,8 @@ import { useLogoutMutation } from '@/services/api/authApi';
 import type { RootState } from '@/redux/store';
 import { AdminSidebarNav } from '@/components/admin/AdminSidebarNav';
 import { canAccessAdminArea, getAdminLandingRoute } from '@/utils/permissions';
-import { canAccessBilling, getEffectiveRole, getRoleLabel, isAdminUser } from '@/utils/roles';
+import { canAccessBilling, getRoleLabel } from '@/utils/roles';
+import { getEffectiveRole, isAdminUser } from '@/utils/role-utils';
 import { useAppLoading } from '@/hooks/useAppLoading';
 
 export function AdminLayout({ children }: { children: React.ReactNode }) {

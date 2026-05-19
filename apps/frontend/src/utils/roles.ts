@@ -1,20 +1,9 @@
 import { UserRole } from '@billing/shared';
 import type { AuthUser } from '@/redux/slices/authSlice';
 import { canAccessAdminArea, getAdminLandingRoute, isCounterOnlyUser } from '@/utils/permissions';
+import { getEffectiveRole, isAdminRole } from '@/utils/role-utils';
 
-/** Prefer RBAC role key when legacy `role` column is out of sync. */
-export function getEffectiveRole(user: Pick<AuthUser, 'role' | 'roleKey'>): UserRole {
-  switch (user.roleKey) {
-    case 'super_admin':
-      return UserRole.SUPER_ADMIN;
-    case 'admin':
-      return UserRole.ADMIN;
-    case 'cashier':
-      return UserRole.CASHIER;
-    default:
-      return user.role;
-  }
-}
+export { getEffectiveRole, isAdminRole, isAdminUser } from '@/utils/role-utils';
 
 export function getHomeRoute(role: UserRole): string {
   if (role === UserRole.CASHIER) return '/billing';
@@ -28,14 +17,6 @@ export function getHomeRouteForUser(
   if (isCounterOnlyUser(user as AuthUser)) return '/billing';
   if (canAccessAdminArea(user as AuthUser)) return getAdminLandingRoute(user as AuthUser);
   return getHomeRoute(getEffectiveRole(user));
-}
-
-export function isAdminRole(role: UserRole): boolean {
-  return role === UserRole.SUPER_ADMIN || role === UserRole.ADMIN;
-}
-
-export function isAdminUser(user: Pick<AuthUser, 'role' | 'roleKey'>): boolean {
-  return isAdminRole(getEffectiveRole(user));
 }
 
 export function canAccessDashboard(role: UserRole): boolean {

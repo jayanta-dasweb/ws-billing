@@ -1,6 +1,6 @@
 import type { AuthUser } from '@/redux/slices/authSlice';
 import { hasPermission } from '@/utils/permissions';
-import { isAdminUser } from '@/utils/roles';
+import { isAdminUser } from '@/utils/role-utils';
 
 export type AdminNavItem = {
   href: string;
