@@ -57,6 +57,8 @@ cp .env.example .env
 
 Edit only if your MySQL/Redis hosts or ports differ. Defaults match `docker-compose.yml` (`billing` / `billing_secret`).
 
+`.env.example` lists **every** variable the app reads. After `cp`, your `.env` should have the same keys (JWT secrets and passwords can be your own values). If you pull repo updates, diff against `.env.example` and add any new keys you are missing.
+
 ### Step 3 — Install dependencies
 
 From **repo root**:
