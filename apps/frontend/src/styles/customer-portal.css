@@ -1,0 +1,62 @@
+/* AdminLTE body.layout-fixed sets overflow:hidden — allow scroll on customer portal */
+body.layout-fixed:has(.customer-portal),
+body.layout-fixed:has(.login-page) {
+  height: auto;
+  min-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.customer-portal main {
+  overflow: visible;
+}
+
+.customer-portal-nav .nav-link.active {
+  color: #007bff;
+}
+
+.customer-stat-card {
+  border: none;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.customer-stat-card .stat-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #0d9488;
+}
+
+.customer-product-rank {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #eee;
+}
+
+.customer-product-rank:last-child {
+  border-bottom: none;
+}
+
+.customer-invoice-row {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.customer-invoice-row:hover {
+  background: #f8f9fa;
+}
+
+.customer-month-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #e9ecef;
+  overflow: hidden;
+}
+
+.customer-month-bar__fill {
+  height: 100%;
+  background: linear-gradient(90deg, #0d9488, #14b8a6);
+  border-radius: 3px;
+}

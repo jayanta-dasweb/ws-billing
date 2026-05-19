@@ -1,0 +1,17 @@
+{
+  "name": "Billing System",
+  "short_name": "Billing",
+  "description": "Real-time POS billing",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#007bff",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.next/
+.next-dev/
+*.tsbuildinfo
+
+# Environment (never commit secrets)
+.env
+.env.local
+.env.*.local
+apps/backend/.env
+apps/frontend/.env
+
+# Logs & runtime
+*.log
+logs/
+apps/backend/logs/
+
+# Storage (invoices PDF, uploads)
+storage/
+uploads/
+apps/backend/storage/
+
+# Test & coverage
+coverage/
+.nyc_output/
+
+# OS & editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Prisma local DB (if used)
+apps/backend/prisma/*.db
+apps/backend/prisma/*.db-journal
+
+# Misc
+.turbo/
+*.pem

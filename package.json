@@ -1,0 +1,29 @@
+{
+  "name": "billing-system",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run build -w @billing/shared && node apps/backend/scripts/kill-port.mjs 4000 && node apps/backend/scripts/kill-port.mjs 3000 && concurrently \"npm run dev -w @billing/backend\" \"npm run dev -w @billing/frontend\"",
+    "dev:backend": "npm run dev -w @billing/backend",
+    "dev:frontend": "npm run dev -w @billing/frontend",
+    "dev:reset": "npm run build -w @billing/shared && node apps/backend/scripts/kill-port.mjs 4000 && node apps/backend/scripts/kill-port.mjs 3000 && npm run prisma:generate && npm run clean -w @billing/backend && npm run clean -w @billing/frontend && concurrently \"npm run dev:fresh -w @billing/backend\" \"npm run dev -w @billing/frontend\"",
+    "build": "npm run build -w @billing/shared && npm run build -w @billing/backend && npm run build -w @billing/frontend",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "prisma:generate": "npm run prisma:generate -w @billing/backend",
+    "prisma:migrate": "npm run prisma:migrate -w @billing/backend",
+    "prisma:deploy": "npm run prisma:deploy -w @billing/backend",
+    "smoke:billing": "node apps/backend/scripts/smoke-billing.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,652 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider          = "mysql"
+  url               = env("DATABASE_URL")
+  // Local dev: use root (or a user with CREATE DATABASE) — see SHADOW_DATABASE_URL in .env.example
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+enum BillStatus {
+  DRAFT
+  HOLD
+  PENDING_COMMIT
+  COMMITTING
+  COMPLETED
+  FAILED_STOCK
+  CANCELLED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  CASHIER
+}
+
+enum CustomerType {
+  WALK_IN
+  BUSINESS
+}
+
+enum PaymentMode {
+  CASH
+  CARD
+  UPI
+  CHEQUE
+  DD
+  SPLIT
+  CREDIT
+}
+
+enum ReturnStatus {
+  DRAFT
+  COMPLETED
+  CANCELLED
+}
+
+enum ReturnType {
+  FULL
+  PARTIAL
+}
+
+enum StockMovementType {
+  SALE_COMMIT
+  SALE_RETURN
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  DAMAGE
+  OPENING
+}
+
+enum StockAdjustmentReason {
+  PHYSICAL_COUNT
+  DAMAGE
+  EXPIRED
+  THEFT
+  CORRECTION
+  OTHER
+}
+
+model Company {
+  id            String   @id @default(cuid())
+  name          String
+  address       String   @db.Text
+  gstin         String?
+  pan           String?
+  phone         String?
+  email         String?
+  logoUrl       String?  @map("logo_url")
+  invoiceFooter String?  @map("invoice_footer") @db.Text
+  invoiceTerms  String?  @map("invoice_terms") @db.Text
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  invoices Invoice[]
+
+  @@map("companies")
+}
+
+model Counter {
+  id        String   @id @default(cuid())
+  name      String
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users    User[]
+  userCounters UserCounter[]
+  ipRules      CounterIpRule[]
+  bills        Bill[]
+  salesReturns SalesReturn[]
+
+  @@index([isActive])
+  @@map("counters")
+}
+
+model UserCounter {
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id")
+  counterId  String   @map("counter_id")
+  isPrimary  Boolean  @default(false) @map("is_primary")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  counter Counter @relation(fields: [counterId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, counterId])
+  @@index([counterId])
+  @@map("user_counters")
+}
+
+model CounterIpRule {
+  id          String   @id @default(cuid())
+  counterId   String   @map("counter_id")
+  cidr        String
+  label       String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  counter Counter @relation(fields: [counterId], references: [id], onDelete: Cascade)
+
+  @@index([counterId])
+  @@map("counter_ip_rules")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String?  @db.Text
+  isSystem    Boolean  @default(false) @map("is_system")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  users       User[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  code        String   @id
+  groupKey    String   @map("group_key")
+  resource    String
+  action      String
+  name        String
+  description String?  @db.Text
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  roleGrants  RolePermission[]
+  userGrants  UserPermission[]
+
+  @@index([groupKey, resource])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId         String   @map("role_id")
+  permissionCode String   @map("permission_code")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionCode], references: [code], onDelete: Cascade)
+
+  @@id([roleId, permissionCode])
+  @@map("role_permissions")
+}
+
+model UserPermission {
+  userId         String   @map("user_id")
+  permissionCode String   @map("permission_code")
+  granted        Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionCode], references: [code], onDelete: Cascade)
+
+  @@id([userId, permissionCode])
+  @@map("user_permissions")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  role         UserRole @default(CASHIER)
+  roleId       String?  @map("role_id")
+  counterId    String?  @map("counter_id")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  rbacRole      Role?            @relation(fields: [roleId], references: [id])
+  counter       Counter?         @relation(fields: [counterId], references: [id])
+  userCounters  UserCounter[]
+  permissions   UserPermission[]
+  bills            Bill[]
+  salesReturns     SalesReturn[]
+  stockAdjustments StockAdjustment[]
+  stockMovements   StockMovement[]
+  refreshTokens    RefreshToken[]
+  auditLogs        AuditLog[]
+
+  @@index([counterId])
+  @@index([role])
+  @@index([roleId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @map("token_hash")
+  userId    String   @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  revokedAt DateTime? @map("revoked_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+model Customer {
+  id              String       @id @default(cuid())
+  name            String
+  mobile          String?
+  passwordHash    String?      @map("password_hash")
+  gstNumber       String?      @map("gst_number")
+  panNumber       String?      @map("pan_number")
+  billingAddress  String?      @map("billing_address") @db.Text
+  shippingAddress String?      @map("shipping_address") @db.Text
+  email           String?
+  creditLimit     Decimal      @default(0) @map("credit_limit") @db.Decimal(12, 2)
+  customerType    CustomerType @default(WALK_IN) @map("customer_type")
+  isActive        Boolean      @default(true) @map("is_active")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  bills          Bill[]
+  salesReturns   SalesReturn[]
+  refreshTokens  CustomerRefreshToken[]
+  otpChallenges  CustomerOtpChallenge[]
+
+  @@index([mobile])
+  @@index([gstNumber])
+  @@index([name])
+  @@map("customers")
+}
+
+model CustomerRefreshToken {
+  id         String    @id @default(cuid())
+  tokenHash  String    @map("token_hash")
+  customerId String    @map("customer_id")
+  expiresAt  DateTime  @map("expires_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  revokedAt  DateTime? @map("revoked_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([tokenHash])
+  @@map("customer_refresh_tokens")
+}
+
+model CustomerOtpChallenge {
+  id         String    @id @default(cuid())
+  customerId String    @map("customer_id")
+  mobile     String
+  purpose    String
+  codeHash   String    @map("code_hash")
+  expiresAt  DateTime  @map("expires_at")
+  attempts   Int       @default(0)
+  verifiedAt DateTime? @map("verified_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, purpose])
+  @@index([mobile, purpose])
+  @@map("customer_otp_challenges")
+}
+
+model TaxMaster {
+  id        String   @id @default(cuid())
+  name      String
+  gstPercent Decimal @map("gst_percent") @db.Decimal(5, 2)
+  cgstPercent Decimal @map("cgst_percent") @db.Decimal(5, 2)
+  sgstPercent Decimal @map("sgst_percent") @db.Decimal(5, 2)
+  igstPercent Decimal @map("igst_percent") @db.Decimal(5, 2)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  products Product[]
+
+  @@map("tax_masters")
+}
+
+model Product {
+  id           String   @id @default(cuid())
+  name         String
+  barcode      String?  @unique
+  sku          String?
+  hsnCode      String?  @map("hsn_code")
+  taxMasterId  String?  @map("tax_master_id")
+  sellingPrice       Decimal @map("selling_price") @db.Decimal(12, 2)
+  discountPercent    Decimal @default(0) @map("discount_percent") @db.Decimal(5, 2)
+  discountPerUnit    Decimal @default(0) @map("discount_per_unit") @db.Decimal(12, 2)
+  batchEnabled Boolean  @default(true) @map("batch_enabled")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  taxMaster        TaxMaster?         @relation(fields: [taxMasterId], references: [id])
+  batches          BatchStock[]
+  billItems        BillItem[]
+  returnItems      SalesReturnItem[]
+  stockAdjustments StockAdjustment[]
+  stockMovements   StockMovement[]
+
+  @@index([barcode])
+  @@index([sku])
+  @@index([name])
+  @@map("products")
+}
+
+model BatchStock {
+  id           String    @id @default(cuid())
+  productId    String    @map("product_id")
+  batchNumber  String    @map("batch_number")
+  expiryDate   DateTime? @map("expiry_date")
+  mrp          Decimal   @db.Decimal(12, 2)
+  sellingPrice    Decimal @map("selling_price") @db.Decimal(12, 2)
+  discountPercent Decimal @default(0) @map("discount_percent") @db.Decimal(5, 2)
+  discountPerUnit Decimal @default(0) @map("discount_per_unit") @db.Decimal(12, 2)
+  stockQty     Decimal   @default(0) @map("stock_qty") @db.Decimal(12, 3)
+  pendingQty   Decimal   @default(0) @map("pending_qty") @db.Decimal(12, 3)
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  product          Product           @relation(fields: [productId], references: [id])
+  billItems        BillItem[]
+  returnItems      SalesReturnItem[]
+  stockAdjustments StockAdjustment[]
+  stockMovements   StockMovement[]
+
+  @@unique([productId, batchNumber])
+  @@index([productId])
+  @@index([batchNumber])
+  @@index([expiryDate])
+  @@map("batch_stock")
+}
+
+model Bill {
+  id            String     @id @default(cuid())
+  billNo        String?    @map("bill_no")
+  status        BillStatus @default(DRAFT)
+  counterId     String     @map("counter_id")
+  userId        String     @map("user_id")
+  customerId    String?    @map("customer_id")
+  subtotal      Decimal    @default(0) @db.Decimal(12, 2)
+  discountTotal Decimal    @default(0) @map("discount_total") @db.Decimal(12, 2)
+  cgstTotal     Decimal    @default(0) @map("cgst_total") @db.Decimal(12, 2)
+  sgstTotal     Decimal    @default(0) @map("sgst_total") @db.Decimal(12, 2)
+  igstTotal     Decimal    @default(0) @map("igst_total") @db.Decimal(12, 2)
+  roundOff      Decimal    @default(0) @map("round_off") @db.Decimal(12, 2)
+  grandTotal    Decimal    @default(0) @map("grand_total") @db.Decimal(12, 2)
+  paymentMode   PaymentMode? @map("payment_mode")
+  cashReceived  Decimal?   @map("cash_received") @db.Decimal(12, 2)
+  balanceReturn Decimal?   @map("balance_return") @db.Decimal(12, 2)
+  isCredit      Boolean    @default(false) @map("is_credit")
+  creditNote    String?    @map("credit_note")
+  commitError   String?    @map("commit_error") @db.Text
+  queuedAt      DateTime?  @map("queued_at")
+  committedAt   DateTime?  @map("committed_at")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  counter  Counter   @relation(fields: [counterId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+  customer Customer? @relation(fields: [customerId], references: [id])
+  items         BillItem[]
+  payments      BillPayment[]
+  invoice       Invoice?
+  salesReturns  SalesReturn[]
+
+  @@index([status])
+  @@index([counterId, status])
+  @@index([createdAt])
+  @@map("bills")
+}
+
+model BillItem {
+  id            String  @id @default(cuid())
+  billId        String  @map("bill_id")
+  productId     String  @map("product_id")
+  batchId       String? @map("batch_id")
+  productName   String  @map("product_name")
+  hsnCode       String? @map("hsn_code")
+  batchNumber   String? @map("batch_number")
+  qty           Decimal @db.Decimal(12, 3)
+  rate          Decimal @db.Decimal(12, 2)
+  discount      Decimal @default(0) @db.Decimal(12, 2)
+  taxableAmount Decimal @map("taxable_amount") @db.Decimal(12, 2)
+  gstPercent    Decimal @map("gst_percent") @db.Decimal(5, 2)
+  cgstAmount    Decimal @default(0) @map("cgst_amount") @db.Decimal(12, 2)
+  sgstAmount    Decimal @default(0) @map("sgst_amount") @db.Decimal(12, 2)
+  igstAmount    Decimal @default(0) @map("igst_amount") @db.Decimal(12, 2)
+  lineTotal     Decimal @map("line_total") @db.Decimal(12, 2)
+  sortOrder     Int     @default(0) @map("sort_order")
+
+  bill         Bill              @relation(fields: [billId], references: [id], onDelete: Cascade)
+  product      Product           @relation(fields: [productId], references: [id])
+  batch        BatchStock?       @relation(fields: [batchId], references: [id])
+  returnItems  SalesReturnItem[]
+
+  @@index([billId])
+  @@index([batchId])
+  @@map("bill_items")
+}
+
+model BillPayment {
+  id        String      @id @default(cuid())
+  billId    String      @map("bill_id")
+  mode      PaymentMode
+  amount    Decimal     @db.Decimal(12, 2)
+  reference String?     @map("reference")
+  auditJson Json?       @map("audit_json")
+  sortOrder Int         @default(0) @map("sort_order")
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+
+  @@index([billId])
+  @@map("bill_payments")
+}
+
+model Invoice {
+  id          String   @id @default(cuid())
+  invoiceNo   String   @unique @map("invoice_no")
+  billId      String   @unique @map("bill_id")
+  companyId   String   @map("company_id")
+  invoiceDate DateTime @map("invoice_date")
+  pdfPath     String?  @map("pdf_path")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  bill    Bill    @relation(fields: [billId], references: [id])
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([invoiceNo])
+  @@index([invoiceDate])
+  @@map("invoices")
+}
+
+enum AuditSeverity {
+  INFO
+  WARNING
+  CRITICAL
+  SECURITY_ALERT
+}
+
+enum AuditSource {
+  MANUAL
+  SYSTEM
+  SCHEDULED
+  API
+}
+
+/// Immutable activity log (Spatie-style). Never update or delete rows.
+model AuditLog {
+  id            String         @id @default(cuid())
+  userId        String?        @map("user_id")
+  username      String?
+  roleKey       String?        @map("role_key")
+  counterId     String?        @map("counter_id")
+  sessionId     String?        @map("session_id")
+  action        String
+  module        String
+  entity        String
+  entityId      String?        @map("entity_id")
+  severity      AuditSeverity  @default(INFO)
+  source        AuditSource    @default(MANUAL)
+  success       Boolean        @default(true)
+  description   String?        @db.Text
+  referenceType String?        @map("reference_type")
+  referenceId   String?        @map("reference_id")
+  beforeData    Json?          @map("before_data")
+  afterData     Json?          @map("after_data")
+  properties    Json?
+  metadata      Json?
+  reason        String?        @db.Text
+  ipAddress     String?        @map("ip_address")
+  userAgent     String?        @map("user_agent") @db.VarChar(512)
+  requestSource String?        @map("request_source")
+  batchUuid     String?        @map("batch_uuid")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([module])
+  @@index([action])
+  @@index([severity])
+  @@index([entity, entityId])
+  @@index([referenceType, referenceId])
+  @@index([counterId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model PaymentModeMaster {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("payment_mode_masters")
+}
+
+model InvoiceSequence {
+  id      String @id @default("default")
+  prefix  String @default("INV")
+  lastNo  Int    @default(0) @map("last_no")
+  year    Int
+
+  @@map("invoice_sequences")
+}
+
+model ReturnSequence {
+  id     String @id @default("default")
+  prefix String @default("RET")
+  lastNo Int    @default(0) @map("last_no")
+  year   Int
+
+  @@map("return_sequences")
+}
+
+model SalesReturn {
+  id           String       @id @default(cuid())
+  returnNo     String?      @unique @map("return_no")
+  status       ReturnStatus @default(DRAFT)
+  returnType   ReturnType   @map("return_type")
+  billId       String       @map("bill_id")
+  counterId    String       @map("counter_id")
+  userId       String       @map("user_id")
+  customerId   String?      @map("customer_id")
+  refundTotal  Decimal      @default(0) @map("refund_total") @db.Decimal(12, 2)
+  refundMode   PaymentMode? @map("refund_mode")
+  refundNote   String?      @map("refund_note") @db.Text
+  completedAt  DateTime?    @map("completed_at")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  bill     Bill              @relation(fields: [billId], references: [id])
+  counter  Counter           @relation(fields: [counterId], references: [id])
+  user     User              @relation(fields: [userId], references: [id])
+  customer Customer?         @relation(fields: [customerId], references: [id])
+  items    SalesReturnItem[]
+
+  @@index([billId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("sales_returns")
+}
+
+model SalesReturnItem {
+  id          String  @id @default(cuid())
+  returnId    String  @map("return_id")
+  billItemId  String  @map("bill_item_id")
+  productId   String  @map("product_id")
+  batchId     String? @map("batch_id")
+  productName String  @map("product_name")
+  batchNumber String? @map("batch_number")
+  qty         Decimal @db.Decimal(12, 3)
+  rate        Decimal @db.Decimal(12, 2)
+  lineTotal   Decimal @map("line_total") @db.Decimal(12, 2)
+  reason      String? @db.Text
+
+  salesReturn SalesReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  billItem    BillItem    @relation(fields: [billItemId], references: [id])
+  product     Product     @relation(fields: [productId], references: [id])
+  batch       BatchStock? @relation(fields: [batchId], references: [id])
+
+  @@index([returnId])
+  @@index([billItemId])
+  @@map("sales_return_items")
+}
+
+model StockAdjustment {
+  id        String                @id @default(cuid())
+  adjNo     String?               @unique @map("adj_no")
+  batchId   String                @map("batch_id")
+  productId String                @map("product_id")
+  qtyDelta  Decimal               @map("qty_delta") @db.Decimal(12, 3)
+  reason    StockAdjustmentReason
+  notes     String?               @db.Text
+  userId    String                @map("user_id")
+  createdAt DateTime              @default(now()) @map("created_at")
+
+  batch   BatchStock @relation(fields: [batchId], references: [id])
+  product Product    @relation(fields: [productId], references: [id])
+  user    User       @relation(fields: [userId], references: [id])
+
+  @@index([batchId])
+  @@index([createdAt])
+  @@map("stock_adjustments")
+}
+
+model StockMovement {
+  id            String            @id @default(cuid())
+  batchId       String            @map("batch_id")
+  productId     String            @map("product_id")
+  movementType  StockMovementType @map("movement_type")
+  qtyDelta      Decimal           @map("qty_delta") @db.Decimal(12, 3)
+  qtyBefore     Decimal           @map("qty_before") @db.Decimal(12, 3)
+  qtyAfter      Decimal           @map("qty_after") @db.Decimal(12, 3)
+  referenceType String            @map("reference_type")
+  referenceId   String            @map("reference_id")
+  userId        String?           @map("user_id")
+  notes         String?           @db.Text
+  createdAt     DateTime          @default(now()) @map("created_at")
+
+  batch   BatchStock @relation(fields: [batchId], references: [id])
+  product Product    @relation(fields: [productId], references: [id])
+  user    User?      @relation(fields: [userId], references: [id])
+
+  @@index([batchId, createdAt])
+  @@index([referenceType, referenceId])
+  @@index([createdAt])
+  @@map("stock_movements")
+}
