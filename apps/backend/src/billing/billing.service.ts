@@ -617,11 +617,27 @@ export class BillingService {
         line.productId,
         Number(line.qty),
         bill.counterId,
-        { lineId, counterName: counter?.name ?? 'Counter', lineQtyHint: 0 },
+        {
+          lineId,
+          counterName: counter?.name ?? 'Counter',
+          lineQtyHint: 0,
+          suppressBroadcast: true,
+        },
       );
     }
 
     await this.prisma.billItem.delete({ where: { id: lineId } });
+
+    if (line.batchId) {
+      await this.reservations.publishLineStockState(line.batchId, line.productId, {
+        billId,
+        lineId,
+        counterId: bill.counterId,
+        counterName: counter?.name ?? 'Counter',
+        lineQty: 0,
+        reservedForLine: 0,
+      });
+    }
     await this.recalcBill(billId);
     await this.audit.activity({
       action: AuditAction.LINE_REMOVED,

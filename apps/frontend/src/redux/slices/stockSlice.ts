@@ -1,5 +1,6 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type { StockPendingUpdatedPayload } from '@billing/shared';
+import { shortageAlertKey } from '@/utils/batchShortageAlerts';
 
 type StockMap = Record<string, StockPendingUpdatedPayload>;
 
@@ -36,8 +37,13 @@ const stockSlice = createSlice({
       const p = action.payload;
       state.batches[p.batchId] = p;
       state.lastUpdated = new Date().toISOString();
+      const key = shortageAlertKey({
+        batchId: p.batchId,
+        billId: p.billId,
+        lineId: p.lineId,
+      });
       if (p.shortageQty != null && p.shortageQty > 0.001) {
-        state.batchShortageAlerts[p.batchId] = {
+        state.batchShortageAlerts[key] = {
           batchId: p.batchId,
           productId: p.productId,
           shortageQty: p.shortageQty,
@@ -49,17 +55,24 @@ const stockSlice = createSlice({
           updatedAt: p.updatedAt ?? new Date().toISOString(),
         };
       } else {
-        delete state.batchShortageAlerts[p.batchId];
+        delete state.batchShortageAlerts[key];
       }
     },
     clearBatchShortageAlert(state, action: PayloadAction<string>) {
       delete state.batchShortageAlerts[action.payload];
     },
+    clearShortageAlertForLine(
+      state,
+      action: PayloadAction<{ batchId: string; billId: string; lineId: string }>,
+    ) {
+      const key = shortageAlertKey(action.payload);
+      delete state.batchShortageAlerts[key];
+    },
     clearShortageAlertsForBill(state, action: PayloadAction<string | null | undefined>) {
       const billId = action.payload;
       if (!billId) return;
-      for (const [batchId, alert] of Object.entries(state.batchShortageAlerts)) {
-        if (alert.billId === billId) delete state.batchShortageAlerts[batchId];
+      for (const [key, alert] of Object.entries(state.batchShortageAlerts)) {
+        if (alert.billId === billId) delete state.batchShortageAlerts[key];
       }
     },
     setBatchStocks(state, action: PayloadAction<StockPendingUpdatedPayload[]>) {
@@ -75,6 +88,7 @@ export const {
   updateBatchStock,
   setBatchStocks,
   clearBatchShortageAlert,
+  clearShortageAlertForLine,
   clearShortageAlertsForBill,
 } = stockSlice.actions;
 export default stockSlice.reducer;

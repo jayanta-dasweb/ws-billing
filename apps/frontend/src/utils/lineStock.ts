@@ -50,20 +50,13 @@ export function calcShortageForAttemptedQty(
   return Math.max(0, round2(attemptedQty - sellable));
 }
 
-/** Whether a WS shortage alert should show on this bill line (incl. other counters, same batch). */
+/** Whether a WS shortage alert should show on this line (same batch — any counter). */
 export function batchShortageAppliesToLine(
   alert: BatchShortageAlert | null | undefined,
   ctx: { batchId?: string; billId?: string | null; lineId?: string },
 ): boolean {
   if (!alert || alert.shortageQty <= 0.001) return false;
-  if (ctx.batchId && alert.batchId !== ctx.batchId) return false;
-  if (alert.billId && ctx.billId && alert.billId === ctx.billId) {
-    if (alert.lineId && ctx.lineId) return alert.lineId === ctx.lineId;
-    return true;
-  }
-  if (alert.billId && ctx.billId && alert.billId !== ctx.billId) {
-    return Boolean(ctx.batchId && alert.batchId === ctx.batchId);
-  }
+  if (!ctx.batchId || alert.batchId !== ctx.batchId) return false;
   return true;
 }
 

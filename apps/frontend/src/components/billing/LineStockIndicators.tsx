@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useLiveBatchStock } from '@/hooks/useLiveBatchStock';
 import type { BatchShortageAlert } from '@/redux/slices/stockSlice';
+import { anyBatchShortage } from '@/utils/batchShortageAlerts';
 import { batchShortageAppliesToLine, calcLineShortage } from '@/utils/lineStock';
 import { StockMetricsInline } from './StockMetrics';
 import { BatchStockHoldModal } from './BatchStockHoldModal';
@@ -143,7 +144,11 @@ export function lineItemHasShortage(
   shortageHints?: Record<string, { short: number }>,
   batchAlert?: BatchShortageAlert | null,
   scope?: { billId?: string | null; lineId?: string; batchId?: string },
+  allAlerts?: Record<string, BatchShortageAlert>,
 ): boolean {
+  if (scope?.batchId && allAlerts && anyBatchShortage(allAlerts, scope.batchId)) {
+    return true;
+  }
   const alertApplies = batchShortageAppliesToLine(batchAlert, {
     batchId: scope?.batchId,
     billId: scope?.billId,

@@ -67,11 +67,10 @@ import { WsConnectionStrip } from '@/components/billing/WsConnectionStrip';
 import { BillingAlertsStrip } from '@/components/billing/OperationalGuidanceBar';
 import { BillingKeyboardHelp } from '@/components/billing/BillingKeyboardHelp';
 import { useBillReservationHeartbeat } from '@/hooks/useBillReservationHeartbeat';
+import { setBatchStocks } from '@/redux/slices/stockSlice';
 import {
-  clearBatchShortageAlert,
-  clearShortageAlertsForBill,
-  setBatchStocks,
-} from '@/redux/slices/stockSlice';
+  pickDisplayShortageAlert,
+} from '@/utils/batchShortageAlerts';
 import { useOfflineBillingSync } from '@/hooks/useOfflineBillingSync';
 import { useTimedAlerts } from '@/hooks/useTimedAlerts';
 import { useLazyGetInvoiceByBillQuery } from '@/services/api/invoiceApi';
@@ -272,8 +271,12 @@ export function BillingScreen() {
         lineItemHasShortage(
           item,
           lineShortageHints,
-          item.batchId ? batchShortageAlerts[item.batchId] : undefined,
+          pickDisplayShortageAlert(batchShortageAlerts, item.batchId, {
+            billId,
+            lineId: item.id,
+          }),
           { billId, lineId: item.id, batchId: item.batchId },
+          batchShortageAlerts,
         ),
       ),
     [items, lineShortageHints, batchShortageAlerts, billId],
@@ -889,8 +892,6 @@ export function BillingScreen() {
             delete next[lineId];
             return next;
           });
-          if (batchId) dispatch(clearBatchShortageAlert(batchId));
-          dispatch(clearShortageAlertsForBill(id));
           if (selectedLineId === lineId) {
             setSelectedLineId(null);
             setLineQtyDraft(null);
@@ -1014,10 +1015,9 @@ export function BillingScreen() {
     setLineQtyDraft(selectedQtyHint?.attemptedQty ?? line?.qty ?? null);
   }, [selectedLineId, selectedQtyHint?.attemptedQty]);
 
-  /** Drop hints/alerts when line removed or batch no longer on this bill. */
+  /** Drop local qty hints when line removed (WS clears shared batchShortageAlerts). */
   useEffect(() => {
     const lineIds = new Set(items.map((i) => i.id));
-    const batchOnBill = new Set(items.map((i) => i.batchId).filter(Boolean) as string[]);
 
     setLineShortageHints((prev) => {
       let changed = false;
@@ -1031,21 +1031,8 @@ export function BillingScreen() {
       return changed ? next : prev;
     });
 
-    for (const [batchId, alert] of Object.entries(batchShortageAlerts)) {
-      const isOurBill = alert.billId != null && alert.billId === billId;
-      if (!isOurBill) {
-        if (!batchOnBill.has(batchId)) {
-          dispatch(clearBatchShortageAlert(batchId));
-        }
-        continue;
-      }
-      const lineGone = alert.lineId != null && !lineIds.has(alert.lineId);
-      const batchGone = !batchOnBill.has(batchId);
-      if (lineGone || batchGone) {
-        dispatch(clearBatchShortageAlert(batchId));
-      }
-    }
-  }, [items, batchShortageAlerts, billId, dispatch]);
+    // batchShortageAlerts: only cleared by WebSocket when server resolves shortage (qty down / line removed).
+  }, [items, dispatch]);
 
   const applyQtyShortageHint = useCallback(
     (
@@ -1429,7 +1416,13 @@ export function BillingScreen() {
                       </td>
                     </tr>
                   ) : (
-                    items.map((item, idx) => (
+                    items.map((item, idx) => {
+                      const batchAlert = pickDisplayShortageAlert(
+                        batchShortageAlerts,
+                        item.batchId,
+                        { billId, lineId: item.id },
+                      );
+                      return (
                       <tr
                         key={item.id}
                         className={[
@@ -1437,8 +1430,9 @@ export function BillingScreen() {
                           lineItemHasShortage(
                             item,
                             lineShortageHints,
-                            item.batchId ? batchShortageAlerts[item.batchId] : undefined,
+                            batchAlert,
                             { billId, lineId: item.id, batchId: item.batchId },
+                            batchShortageAlerts,
                           )
                             ? 'billing-line--shortage'
                             : '',
@@ -1485,16 +1479,12 @@ export function BillingScreen() {
                             stockQty={item.stockQty}
                             forceDetails={item.id === stockHintLineId}
                             shortageOverride={
-                              lineShortageHints[item.id]?.short ??
-                              batchShortageAlerts[item.batchId!]?.shortageQty
+                              lineShortageHints[item.id]?.short ?? batchAlert?.shortageQty
                             }
                             attemptedQty={
-                              lineShortageHints[item.id]?.attemptedQty ??
-                              batchShortageAlerts[item.batchId!]?.attemptedQty
+                              lineShortageHints[item.id]?.attemptedQty ?? batchAlert?.attemptedQty
                             }
-                            batchShortageAlert={
-                              item.batchId ? batchShortageAlerts[item.batchId] : undefined
-                            }
+                            batchShortageAlert={batchAlert}
                           />
                         </td>
                         <td className="text-right">{item.rate.toFixed(2)}</td>
@@ -1514,7 +1504,8 @@ export function BillingScreen() {
                         </td>
                         <td className="text-right">{item.lineTotal.toFixed(2)}</td>
                       </tr>
-                    ))
+                    );
+                    })
                   )}
                 </tbody>
               </table>
