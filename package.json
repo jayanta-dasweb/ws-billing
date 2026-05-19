@@ -17,6 +17,7 @@
     "prisma:generate": "npm run prisma:generate -w @billing/backend",
     "prisma:migrate": "npm run prisma:migrate -w @billing/backend",
     "prisma:deploy": "npm run prisma:deploy -w @billing/backend",
+    "prisma:seed": "npm run prisma:seed -w @billing/backend",
     "smoke:billing": "node apps/backend/scripts/smoke-billing.mjs"
   },
   "devDependencies": {

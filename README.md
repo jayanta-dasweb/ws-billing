@@ -29,46 +29,128 @@ High-level context: staff and customers use the Next.js app; the NestJS API hand
 
 ## Prerequisites
 
-- **Node.js 20+** and npm
-- **Docker Desktop** (for MySQL + Redis — easiest path)
+- **Node.js 20+** and **npm**
+- **Docker Desktop** (runs **MySQL 8** and **Redis 7**)
+- **Git**
+
+> **Where to run commands:** stay in the **repo root** folder (`ws-billing/`) for all steps below unless we say otherwise.  
+> You do **not** need `cd apps/backend` if you use the root `npm run …` scripts (they load `.env` from the root automatically).
 
 ---
 
-## Quick setup (~5 minutes)
+## Installation (local dev — recommended)
 
-For reviewers who want the app running locally with minimal steps.
-
-### 1. Clone and install
+### Step 1 — Clone the repository
 
 ```bash
 git clone https://github.com/jayanta-dasweb/ws-billing.git
 cd ws-billing
+```
+
+### Step 2 — Environment file (required)
+
+Create `.env` at the **repo root** (same folder as `package.json`):
+
+```bash
 cp .env.example .env
+```
+
+Edit only if your MySQL/Redis hosts or ports differ. Defaults match `docker-compose.yml` (`billing` / `billing_secret`).
+
+### Step 3 — Install dependencies
+
+From **repo root**:
+
+```bash
 npm install
 ```
 
-### 2. Start database & cache
+This installs the monorepo (`apps/backend`, `apps/frontend`, `packages/shared`).
+
+### Step 4 — Start MySQL and Redis
+
+From **repo root**:
 
 ```bash
 docker compose up -d mysql redis
 ```
 
-Wait ~30 seconds for MySQL to be healthy (`docker compose ps`).
-
-### 3. Database schema + demo data
+Wait until MySQL is healthy (about 30–60 seconds):
 
 ```bash
-npm run prisma:deploy
-npm run prisma:seed -w @billing/backend
+docker compose ps
 ```
 
-### 4. Run the app
+`billing-mysql` should show **healthy**. If not, wait and run `docker compose ps` again.
+
+### Step 5 — Database: generate client, migrate, seed
+
+Run these from **repo root** (in order):
+
+```bash
+npm run prisma:generate
+npm run prisma:deploy
+npm run prisma:seed
+```
+
+| Command | What it does |
+|---------|----------------|
+| `prisma:generate` | Builds Prisma Client from `apps/backend/prisma/schema.prisma` |
+| `prisma:deploy` | Applies all SQL migrations to MySQL (safe for fresh DB) |
+| `prisma:seed` | Inserts demo users, counters, sample masters |
+
+**Alternative (from `apps/backend` folder):** only if you prefer running Prisma CLI directly:
+
+```bash
+cd apps/backend
+npx dotenv -e ../../.env -- prisma generate
+npx dotenv -e ../../.env -- prisma migrate deploy
+npx dotenv -e ../../.env -- prisma db seed
+cd ../..
+```
+
+> Use **`prisma migrate deploy`** for setup/review (not `migrate dev`).  
+> `migrate dev` needs `SHADOW_DATABASE_URL` and is for developers changing the schema.
+
+### Step 6 — Run the application
+
+From **repo root**:
 
 ```bash
 npm run dev
 ```
 
-Wait until you see the frontend on port **3000** and backend on **4000**.
+This will:
+
+1. Build `packages/shared`
+2. Start **backend** on http://localhost:4000
+3. Start **frontend** on http://localhost:3000
+
+Leave this terminal open. Open the URLs below in your browser.
+
+### Step 7 — Verify (optional)
+
+| Check | URL |
+|-------|-----|
+| API health | http://localhost:4000/api/v1/health |
+| Swagger | http://localhost:4000/docs |
+| App home | http://localhost:3000 |
+
+---
+
+## Quick command cheat sheet (repo root)
+
+```bash
+cd ws-billing
+cp .env.example .env
+npm install
+docker compose up -d mysql redis
+# wait for mysql healthy
+npm run prisma:generate
+npm run prisma:deploy
+npm run prisma:seed
+npm run dev
+```
 
 ---
 
@@ -97,46 +179,24 @@ Customer portal: use a **registered customer mobile** from master data (created 
 
 ---
 
-## Environment file
-
-All config lives in **one file** at the repo root:
-
-```bash
-cp .env.example .env
-```
-
-The example file is ready to use with Docker Compose defaults (`billing` / `billing_secret` on MySQL). Do not commit `.env` — it is gitignored.
-
----
-
 ## Docker
 
-### Option A — MySQL + Redis only (recommended for development)
+### Option A — MySQL + Redis only (recommended)
 
-Use with `npm run dev` on your machine (fastest for UI work):
-
-```bash
-cp .env.example .env
-docker compose up -d mysql redis
-npm install
-npm run prisma:deploy
-npm run prisma:seed -w @billing/backend
-npm run dev
-```
+Same as [Installation](#installation-local-dev--recommended): Docker only for data stores; app runs with `npm run dev` on your machine.
 
 ### Option B — Full stack in Docker
 
-Builds and runs backend, frontend, MySQL, Redis, and Nginx:
+From **repo root**:
 
 ```bash
 cp .env.example .env
 docker compose up -d --build
 ```
 
-Then run migrations once (if the backend container did not apply them):
+The backend container runs `prisma migrate deploy` on start. Seed demo data once:
 
 ```bash
-docker compose exec backend npx prisma migrate deploy
 docker compose exec backend npx ts-node prisma/seed.ts
 ```
 
@@ -154,14 +214,19 @@ docker compose down
 
 ---
 
-## Useful commands
+## Useful commands (run from repo root)
 
 ```bash
-npm run dev              # Frontend :3000 + backend :4000
-npm run build            # Production build
-npm run docker:up        # docker compose up -d
-npm run prisma:deploy    # Apply migrations (production-safe)
-npm run prisma:seed -w @billing/backend   # Demo users & masters
+npm run dev                 # Start frontend :3000 + backend :4000
+npm run dev:backend         # Backend only
+npm run dev:frontend        # Frontend only
+npm run build               # Production build (shared + backend + frontend)
+npm run docker:up           # docker compose up -d
+npm run docker:down         # docker compose down
+npm run prisma:generate     # Regenerate Prisma Client
+npm run prisma:deploy       # Apply migrations (production / fresh DB)
+npm run prisma:migrate      # Create migration (dev only, needs shadow DB)
+npm run prisma:seed         # Demo users, roles, counters, sample data
 ```
 
 ---
@@ -256,10 +321,15 @@ ws-billing/                          # Monorepo root (npm workspaces)
 
 | Issue | Fix |
 |-------|-----|
-| Port 3000 / 4000 in use | Stop other processes or run `npm run dev` (kills ports automatically on Windows) |
-| DB connection refused | `docker compose up -d mysql` and wait for healthy status |
-| Prisma client error | `npm run prisma:generate` |
-| Empty login | Run seed: `npm run prisma:seed -w @billing/backend` |
+| **Wrong folder** | Run `npm install`, `prisma:*`, and `npm run dev` from **repo root** (`ws-billing/`), not inside `apps/frontend` only |
+| **`.env` not found** | `cp .env.example .env` at **repo root** (not inside `apps/backend`) |
+| **Port 3000 / 4000 in use** | Close other apps; `npm run dev` tries to free ports on Windows |
+| **DB connection refused** | `docker compose up -d mysql redis` → wait until `docker compose ps` shows mysql **healthy** |
+| **Prisma / `@prisma/client` error** | From repo root: `npm run prisma:generate` |
+| **Migrations failed** | Ensure MySQL is up; then `npm run prisma:deploy` from repo root |
+| **Empty login / no admin** | From repo root: `npm run prisma:seed` |
+| **`migrate dev` shadow DB error** | Use `npm run prisma:deploy` for setup, or set `SHADOW_DATABASE_URL` in `.env` |
+| **Customer 401 on `/auth/refresh`** | Normal if not staff; customer portal uses `/customer-auth/refresh` only |
 
 ---
 
