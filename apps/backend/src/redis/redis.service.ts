@@ -1,6 +1,10 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { BatchStockSnapshot, STOCK_EVENTS_CHANNEL } from '@billing/shared';
+import {
+  BatchStockSnapshot,
+  EphemeralShortageRecord,
+  STOCK_EVENTS_CHANNEL,
+} from '@billing/shared';
 import Redis from 'ioredis';
 
 const PENDING_KEY = (batchId: string) => `stock:pending:${batchId}`;
@@ -8,6 +12,9 @@ const BATCH_VIEW_KEY = (batchId: string) => `stock:view:${batchId}`;
 const BILL_SESSION_KEY = (billId: string) => `bill:session:${billId}`;
 const BILL_RESERVE_KEY = (billId: string) => `bill:reserve:${billId}`;
 const IDEMPOTENCY_KEY = (scope: string, key: string) => `idempotency:${scope}:${key}`;
+const LINE_SHORTAGE_KEY = (batchId: string, billId: string, lineId: string) =>
+  `stock:shortage:${batchId}:${billId}:${lineId}`;
+const BILL_SHORTAGE_INDEX = (billId: string) => `stock:shortage:bill:${billId}`;
 
 type StockEventHandler = (payload: BatchStockSnapshot) => void;
 
@@ -126,6 +133,49 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async publishStockSnapshot(snapshot: BatchStockSnapshot): Promise<void> {
     await this.setBatchView(snapshot.batchId, snapshot as unknown as Record<string, unknown>);
     await this.client.publish(STOCK_EVENTS_CHANNEL, JSON.stringify(snapshot));
+  }
+
+  /** Shortage signal for open bills — Redis only, never copied to MySQL pending_qty. */
+  async setEphemeralShortage(record: EphemeralShortageRecord, ttlSec?: number): Promise<void> {
+    const ttl = ttlSec ?? this.reservationTtlSec();
+    const key = LINE_SHORTAGE_KEY(record.batchId, record.billId, record.lineId);
+    await this.client.setex(key, ttl, JSON.stringify(record));
+    await this.client.sadd(BILL_SHORTAGE_INDEX(record.billId), key);
+    await this.client.expire(BILL_SHORTAGE_INDEX(record.billId), ttl);
+  }
+
+  async clearEphemeralShortage(
+    batchId: string,
+    billId: string,
+    lineId: string,
+  ): Promise<void> {
+    const key = LINE_SHORTAGE_KEY(batchId, billId, lineId);
+    await this.client.del(key);
+    await this.client.srem(BILL_SHORTAGE_INDEX(billId), key);
+  }
+
+  async clearEphemeralShortagesForBill(billId: string): Promise<void> {
+    const index = BILL_SHORTAGE_INDEX(billId);
+    const keys = await this.client.smembers(index);
+    if (keys.length) {
+      await this.client.del(...keys, index);
+    } else {
+      await this.client.del(index);
+    }
+  }
+
+  async getEphemeralShortage(
+    batchId: string,
+    billId: string,
+    lineId: string,
+  ): Promise<EphemeralShortageRecord | null> {
+    const raw = await this.client.get(LINE_SHORTAGE_KEY(batchId, billId, lineId));
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as EphemeralShortageRecord;
+    } catch {
+      return null;
+    }
   }
 
   async getIdempotencyResult<T>(scope: string, key: string): Promise<T | null> {

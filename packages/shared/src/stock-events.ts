@@ -13,6 +13,23 @@ export interface BatchStockSnapshot {
   counterId?: string;
   counterName?: string;
   updatedAt: string;
+  /** True when shortage is Redis-only (line qty > reserved); not extra MySQL pending. */
+  ephemeralShortage?: boolean;
+}
+
+/** Redis-only shortage record (not written to batch_stock.pending_qty). */
+export interface EphemeralShortageRecord {
+  batchId: string;
+  productId: string;
+  billId: string;
+  lineId: string;
+  counterId: string;
+  counterName?: string;
+  lineQty: number;
+  reservedQty: number;
+  shortageQty: number;
+  ephemeral: true;
+  updatedAt: string;
 }
 
 export const STOCK_EVENTS_CHANNEL = 'billing:stock:events';

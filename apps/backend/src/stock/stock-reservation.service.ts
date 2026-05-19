@@ -61,7 +61,7 @@ export class StockReservationService {
       });
     });
 
-    await this.redis.adjustPendingQty(batchId, qty);
+    await this.redis.syncPendingQty(batchId, Number(batch.pendingQty));
     await this.redis.trackBillReservation(billId, batchId, qty);
     await this.broadcast(batchId, productId, batch, { billId, counterId, lineQtyHint });
     return batch;
@@ -85,7 +85,7 @@ export class StockReservationService {
       where: { id: batchId },
       data: { pendingQty: { decrement: qty } },
     });
-    await this.redis.adjustPendingQty(batchId, -qty);
+    await this.redis.syncPendingQty(batchId, Number(batch.pendingQty));
     await this.redis.trackBillReservation(billId, batchId, -qty);
     if (!meta?.suppressBroadcast) {
       await this.broadcast(batchId, productId, batch, {
@@ -138,6 +138,24 @@ export class StockReservationService {
     const batch = await this.prisma.batchStock.findUnique({ where: { id: batchId } });
     if (!batch) throw new NotFoundException('Batch not found');
     const shortageQty = Math.max(0, opts.lineQty - opts.reservedForLine);
+    const now = new Date().toISOString();
+    if (shortageQty > 0.001) {
+      await this.redis.setEphemeralShortage({
+        batchId,
+        productId,
+        billId: opts.billId,
+        lineId: opts.lineId,
+        counterId: opts.counterId,
+        counterName: opts.counterName,
+        lineQty: opts.lineQty,
+        reservedQty: opts.reservedForLine,
+        shortageQty,
+        ephemeral: true,
+        updatedAt: now,
+      });
+    } else {
+      await this.redis.clearEphemeralShortage(batchId, opts.billId, opts.lineId);
+    }
     await this.broadcast(batchId, productId, batch, {
       billId: opts.billId,
       lineId: opts.lineId,
@@ -146,6 +164,7 @@ export class StockReservationService {
       lineQtyHint: opts.lineQty,
       attemptedQty: opts.lineQty,
       shortageQty,
+      ephemeralShortage: shortageQty > 0.001,
     });
   }
 
@@ -158,6 +177,7 @@ export class StockReservationService {
       if (!item.batchId) continue;
       await this.release(item.batchId, billId, item.productId, Number(item.qty), counterId);
     }
+    await this.redis.clearEphemeralShortagesForBill(billId);
     await this.redis.clearBillSession(billId);
   }
 
@@ -192,6 +212,7 @@ export class StockReservationService {
       lineQtyHint?: number;
       attemptedQty?: number;
       shortageQty?: number;
+      ephemeralShortage?: boolean;
     },
   ) {
     const stockQty = Number(batch.stockQty);
@@ -218,6 +239,7 @@ export class StockReservationService {
       lineId: opts?.lineId,
       counterId: opts?.counterId,
       counterName: opts?.counterName,
+      ephemeralShortage: opts?.ephemeralShortage,
       updatedAt: new Date().toISOString(),
     };
 
@@ -235,17 +257,37 @@ export class StockReservationService {
       counterName: string;
       attemptedQty: number;
       currentLineQty: number;
+      reservedQty?: number;
     },
   ) {
     const batch = await this.prisma.batchStock.findUnique({ where: { id: batchId } });
     if (!batch) throw new NotFoundException('Batch not found');
+    const reserved = opts.reservedQty ?? opts.currentLineQty;
+    const shortageQty = Math.max(0, opts.attemptedQty - reserved);
+    if (shortageQty > 0.001) {
+      await this.redis.setEphemeralShortage({
+        batchId,
+        productId,
+        billId: opts.billId,
+        lineId: opts.lineId,
+        counterId: opts.counterId,
+        counterName: opts.counterName,
+        lineQty: opts.attemptedQty,
+        reservedQty: reserved,
+        shortageQty,
+        ephemeral: true,
+        updatedAt: new Date().toISOString(),
+      });
+    }
     await this.broadcast(batchId, productId, batch, {
       billId: opts.billId,
       lineId: opts.lineId,
       counterId: opts.counterId,
       counterName: opts.counterName,
-      lineQtyHint: opts.currentLineQty,
+      lineQtyHint: opts.attemptedQty,
       attemptedQty: opts.attemptedQty,
+      shortageQty,
+      ephemeralShortage: shortageQty > 0.001,
     });
   }
 }

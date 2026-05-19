@@ -24,6 +24,7 @@ export interface StockPendingUpdatedPayload {
   counterId?: string;
   counterName?: string;
   updatedAt?: string;
+  ephemeralShortage?: boolean;
 }
 
 export interface BillCompletedPayload {

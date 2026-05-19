@@ -174,11 +174,11 @@ export class BillCommitProcessor extends WorkerHost {
       if (bill) {
         for (const item of bill.items) {
           if (!item.batchId) continue;
-          await this.prisma.batchStock.update({
+          const released = await this.prisma.batchStock.update({
             where: { id: item.batchId },
             data: { pendingQty: { decrement: Number(item.qty) } },
           });
-          await this.redis.adjustPendingQty(item.batchId, -Number(item.qty));
+          await this.redis.syncPendingQty(item.batchId, Number(released.pendingQty));
         }
 
         await this.redis.releasePendingForBill(

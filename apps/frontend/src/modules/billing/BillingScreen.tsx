@@ -128,7 +128,7 @@ export function BillingScreen() {
 
   const [fetchInvoice] = useLazyGetInvoiceByBillQuery();
 
-  const { message, error, setMessage, setError } = useTimedAlerts();
+  const { message, error, setMessage, setError } = useTimedAlerts({ messageMs: 12000 });
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
   const [stockHintLineId, setStockHintLineId] = useState<string | null>(null);
   const [lineShortageHints, setLineShortageHints] = useState<
@@ -195,24 +195,24 @@ export function BillingScreen() {
   const busyLabel =
     busyMessage ??
     (scanning
-      ? 'Adding itemâ€¦'
+      ? 'Adding item...'
       : completing
-        ? 'Completing billâ€¦'
+        ? 'Completing bill...'
         : creating
-          ? 'Starting billâ€¦'
+          ? 'Starting bill...'
           : holding
-            ? 'Parking billâ€¦'
+            ? 'Parking bill...'
             : resuming
-              ? 'Opening billâ€¦'
+              ? 'Opening bill...'
               : removing
-                ? 'Removing lineâ€¦'
+                ? 'Removing line...'
                 : settingCustomer
-                  ? 'Updating customerâ€¦'
+                  ? 'Updating customer...'
                   : settingDiscount
-                    ? 'Applying discountâ€¦'
+                    ? 'Applying discount...'
                     : settingRoundOff
-                      ? 'Updating totalâ€¦'
-                      : 'Please waitâ€¦');
+                      ? 'Updating total...'
+                      : 'Please wait...');
 
   const { data: tabs = [], refetch: refetchTabs } = useListOpenBillsQuery(counterId, {
     skip: !counterId,
@@ -399,7 +399,7 @@ export function BillingScreen() {
         setInvoiceDetail(detail);
         setPrintOpen(true);
       } catch (e) {
-        setError(getApiErrorMessage(e, 'Invoice not ready â€” try again in a few seconds'));
+        setError(getApiErrorMessage(e, 'Invoice not ready - try again in a few seconds'));
       }
     },
     [fetchInvoice],
@@ -426,7 +426,7 @@ export function BillingScreen() {
           const fresh = await fetchBill(billId);
           syncFromBill(fresh);
           if (!isOpenBillStatus(fresh.status)) {
-            setMessage('Bill was closed â€” use + New to start');
+            setMessage('Bill was closed - use + New to start');
           }
         } catch {
           clearBill();
@@ -447,7 +447,7 @@ export function BillingScreen() {
         } catch {
           if (!navigator.onLine && isOpenBillStatus(draft.bill.status)) {
             syncFromBill(draft.bill);
-            setMessage('Restored offline draft â€” will sync when online');
+            setMessage('Restored offline draft - will sync when online');
           } else {
             clearBill();
           }
@@ -480,7 +480,7 @@ export function BillingScreen() {
     [clearBill, refetchTabs, setError],
   );
 
-  /** Bootstrap once: open latest today tab, or create one bill â€” never stack parallel creates. */
+  /** Bootstrap once: open latest today tab, or create one bill - never stack parallel creates. */
   useEffect(() => {
     if (!counterId || !draftReady || billId) {
       if (billId) bootstrapRef.current = 'done';
@@ -514,7 +514,7 @@ export function BillingScreen() {
           setSelectedLineId(null);
           void refetchTabs();
           barcodeRef.current?.focus();
-        }, 'Starting billâ€¦');
+        }, 'Starting bill...');
         bootstrapRef.current = 'done';
       } catch (e) {
         bootstrapRef.current = 'idle';
@@ -578,7 +578,7 @@ export function BillingScreen() {
           setSelectedLineId(null);
           void refetchTabs();
           barcodeRef.current?.focus();
-        }, 'Opening billâ€¦');
+        }, 'Opening bill...');
       } catch (e) {
         setError(getApiErrorMessage(e, 'Could not open bill'));
       }
@@ -626,7 +626,7 @@ export function BillingScreen() {
             }
           }
           void refetchTabs();
-        }, 'Closing billâ€¦');
+        }, 'Closing bill...');
       } catch (e) {
         setError(getApiErrorMessage(e, 'Could not close bill'));
       }
@@ -648,7 +648,7 @@ export function BillingScreen() {
         } else {
           setMessage(`Cleared ${result.cancelled} empty bill${result.cancelled === 1 ? '' : 's'}`);
         }
-      }, 'Clearing empty billsâ€¦');
+      }, 'Clearing empty bills...');
     } catch (e) {
       setError(getApiErrorMessage(e, 'Cleanup failed'));
     }
@@ -685,7 +685,7 @@ export function BillingScreen() {
           }
           void refetchTabs();
           setMessage(`Bill sent to ${result.counterName} (${result.assignedToUsername})`);
-        }, 'Transferring billâ€¦');
+        }, 'Transferring bill...');
       } catch (e) {
         setError(getApiErrorMessage(e, 'Could not transfer bill'));
       }
@@ -710,7 +710,7 @@ export function BillingScreen() {
     setError('');
     const id = useBillingStore.getState().billId;
     if (!id) {
-      setError('Bill not ready â€” wait a moment and try again');
+      setError('Bill not ready - wait a moment and try again');
       return;
     }
     try {
@@ -722,12 +722,12 @@ export function BillingScreen() {
           await holdBill(id).unwrap();
           await refetchTabs();
           await startNewBill();
-          setMessage('Bill parked â€” open it from the orange tab above');
+          setMessage('Bill parked - open it from the orange tab above');
         } else {
           await startNewBill();
           setMessage('New walk-in bill started');
         }
-      }, items.length > 0 ? 'Parking billâ€¦' : 'Starting new billâ€¦');
+      }, items.length > 0 ? 'Parking bill...' : 'Starting new bill...');
     } catch (e) {
       setError(getApiErrorMessage(e, items.length > 0 ? 'Park failed' : 'Could not start new bill'));
     }
@@ -747,7 +747,7 @@ export function BillingScreen() {
             barcode: code,
             qty: 1,
           });
-          setMessage(`Offline â€” scan queued (${code})`);
+          setMessage(`Offline - scan queued (${code})`);
           barcodeRef.current?.focus();
           return;
         }
@@ -781,7 +781,7 @@ export function BillingScreen() {
           syncFromBill(bill);
           void refetchTabs();
           barcodeRef.current?.focus();
-        }, 'Adding itemâ€¦');
+        }, 'Adding item...');
       } catch (e) {
         if (dismissIfBillClosed(e)) {
           barcodeRef.current?.focus();
@@ -831,7 +831,7 @@ export function BillingScreen() {
       const bill = await fetchBill(id);
       syncFromBill(bill);
     } catch (e) {
-      setError(getApiErrorMessage(e, 'Could not load bill totals â€” try again'));
+      setError(getApiErrorMessage(e, 'Could not load bill totals - try again'));
       return;
     }
     setPayOpen(true);
@@ -860,9 +860,9 @@ export function BillingScreen() {
         setPayOpen(false);
         const change =
           result.balanceReturn != null && result.balanceReturn > 0
-            ? ` Â· Change â‚¹${result.balanceReturn.toFixed(2)}`
+            ? ` | Change ₹${result.balanceReturn.toFixed(2)}`
             : '';
-        setMessage(`Completed â€” ${result.invoiceNo ?? 'processing stockâ€¦'}${change}`);
+        setMessage(`Completed - ${result.invoiceNo ?? 'processing stock...'}${change}`);
         clearBill();
         await startNewBill();
         void refetchTabs();
@@ -871,7 +871,7 @@ export function BillingScreen() {
             void openPrintForBill(lastCompletedBillId.current);
           }
         }, 2500);
-      }, 'Completing billâ€¦');
+      }, 'Completing bill...');
     },
     [runBusy, ensureBillId, completeBill, clearBill, startNewBill, refetchTabs, openPrintForBill],
   );
@@ -898,7 +898,7 @@ export function BillingScreen() {
           }
           if (stockHintLineId === lineId) setStockHintLineId(null);
           void refetchTabs();
-        }, 'Removing lineâ€¦');
+        }, 'Removing line...');
       } catch (e) {
         setError(getApiErrorMessage(e, 'Remove failed'));
       }
@@ -931,7 +931,7 @@ export function BillingScreen() {
           syncFromBill(bill);
           void refetchTabs();
           barcodeRef.current?.focus();
-        }, 'Adding itemâ€¦');
+        }, 'Adding item...');
       } catch (e) {
         setError(getApiErrorMessage(e, 'Could not add product'));
       }
@@ -965,7 +965,7 @@ export function BillingScreen() {
             bill.customerAddress ?? address,
           );
           void refetchTabs();
-        }, 'Updating customerâ€¦');
+        }, 'Updating customer...');
       } catch (e) {
         setError(getApiErrorMessage(e, 'Customer update failed'));
       }
@@ -1138,7 +1138,7 @@ export function BillingScreen() {
             /* WS alert is best-effort when legacy API rejects qty */
           }
           setError(
-            'Stock is short â€” qty kept on the bill; other counters are alerted. Restart the API if qty does not save.',
+            'Stock is short - qty kept on the bill; other counters are alerted. Restart the API if qty does not save.',
           );
           return;
         }
@@ -1318,7 +1318,7 @@ export function BillingScreen() {
             >
               <i className="fas fa-triangle-exclamation mr-2" aria-hidden />
               <strong>{alert.counterName ?? 'Another counter'}</strong>: short{" "}
-              {alert.shortageQty} on this batch — your line may not be fulfillable
+              {alert.shortageQty} on this batch - your line may not be fulfillable
             </div>
           ))}
 
@@ -1363,13 +1363,13 @@ export function BillingScreen() {
                 </div>
                 <div>
                   <span className="text-muted">Due</span>{' '}
-                  <strong className="text-teal">â‚¹{effectiveGrandTotal.toFixed(2)}</strong>
+                  <strong className="text-teal">₹{effectiveGrandTotal.toFixed(2)}</strong>
                 </div>
               </div>
               {updatingLine && (
                 <p className="small text-primary mb-0 mt-2">
                   <span className="spinner-border spinner-border-sm mr-1" role="presentation" />
-                  Updating lineâ€¦
+                  Updating line...
                 </p>
               )}
 
@@ -1491,7 +1491,7 @@ export function BillingScreen() {
                         <td className="text-right billing-td-disc">
                           {item.discount > 0 ? (
                             <>
-                              âˆ’{item.discount.toFixed(2)}
+                              -{item.discount.toFixed(2)}
                               {item.qty * item.rate > 0 && (
                                 <small className="d-block text-muted">
                                   {round2((item.discount / (item.qty * item.rate)) * 100)}%
@@ -1499,7 +1499,7 @@ export function BillingScreen() {
                               )}
                             </>
                           ) : (
-                            'â€”'
+                            '-'
                           )}
                         </td>
                         <td className="text-right">{item.lineTotal.toFixed(2)}</td>
@@ -1522,8 +1522,8 @@ export function BillingScreen() {
                 }}
               >
                 <small className="text-muted d-block mb-1">
-                  Line {items.findIndex((i) => i.id === selectedLineId) + 1} Â· â†‘â†“ line Â· Tab next Â· Enter
-                  done Â· Esc
+                  Line {items.findIndex((i) => i.id === selectedLineId) + 1} | ^v line | Tab next | Enter
+                  done | Esc
                 </small>
                 <div className="billing-line-edit__row">
                   <label className="small mb-0" htmlFor="line-qty">
@@ -1601,10 +1601,10 @@ export function BillingScreen() {
                 {selectedLineId && lineShortageHints[selectedLineId]?.short > 0 && (
                   <p className="billing-line-edit__short-warn small mb-0 mt-2" role="alert">
                     <i className="fas fa-triangle-exclamation mr-1" aria-hidden />
-                    Need {lineShortageHints[selectedLineId].attemptedQty} â€” short by{' '}
+                    Need {lineShortageHints[selectedLineId].attemptedQty} - short by{' '}
                     <strong>{lineShortageHints[selectedLineId].short}</strong>. Press Tab or{' '}
                     <strong>Done</strong> to save qty and alert all counters
-                    {wsConnected ? '' : ' (Live off â€” check Redis & API)'}.
+                    {wsConnected ? '' : ' (Live off - check Redis & API)'}.
                   </p>
                 )}
               </div>
@@ -1640,26 +1640,26 @@ export function BillingScreen() {
                   <div className="d-flex justify-content-between small text-muted">
                     <span>Gross</span>
                     <span>
-                      â‚¹ {(paymentTotals.subtotal + paymentTotals.lineDiscountTotal).toFixed(2)}
+                      ₹ {(paymentTotals.subtotal + paymentTotals.lineDiscountTotal).toFixed(2)}
                     </span>
                   </div>
                 )}
                 {paymentTotals.lineDiscountTotal > 0 && (
                   <div className="d-flex justify-content-between small text-success">
                     <span>Line disc.</span>
-                    <span>âˆ’ â‚¹ {paymentTotals.lineDiscountTotal.toFixed(2)}</span>
+                    <span>âˆ’ ₹ {paymentTotals.lineDiscountTotal.toFixed(2)}</span>
                   </div>
                 )}
                 <div className="d-flex justify-content-between small">
                   <span>{paymentTotals.lineDiscountTotal > 0.005 ? 'Taxable' : 'Subtotal'}</span>
-                  <span>â‚¹ {paymentTotals.subtotal.toFixed(2)}</span>
+                  <span>₹ {paymentTotals.subtotal.toFixed(2)}</span>
                 </div>
                 {(paymentTotals.cgstTotal + paymentTotals.sgstTotal + paymentTotals.igstTotal) >
                   0.005 && (
                   <div className="d-flex justify-content-between small">
                     <span>GST</span>
                     <span>
-                      + â‚¹{' '}
+                      + ₹{' '}
                       {(
                         paymentTotals.cgstTotal +
                         paymentTotals.sgstTotal +
@@ -1671,7 +1671,7 @@ export function BillingScreen() {
                 {paymentTotals.billDiscount > 0 && (
                   <div className="d-flex justify-content-between small text-success">
                     <span>Bill disc.</span>
-                    <span>âˆ’ â‚¹ {paymentTotals.billDiscount.toFixed(2)}</span>
+                    <span>- ₹ {paymentTotals.billDiscount.toFixed(2)}</span>
                   </div>
                 )}
                 {paymentTotals.roundOff !== 0 && (
@@ -1686,12 +1686,12 @@ export function BillingScreen() {
                 {Math.abs(roundOff) >= 0.005 && (
                   <div className="d-flex justify-content-between small text-muted">
                     <span>Exact (incl. GST)</span>
-                    <span>â‚¹ {effectiveExactDue.toFixed(2)}</span>
+                    <span>₹ {effectiveExactDue.toFixed(2)}</span>
                   </div>
                 )}
                 <div className="d-flex justify-content-between h5 font-weight-bold text-primary mt-1 mb-1">
                   <span>Due</span>
-                  <span>â‚¹ {effectiveGrandTotal.toFixed(2)}</span>
+                  <span>₹ {effectiveGrandTotal.toFixed(2)}</span>
                 </div>
                 {totalsStale && (
                   <p className="small text-warning mb-1">Totals refreshed from line items.</p>
@@ -1704,7 +1704,7 @@ export function BillingScreen() {
                       disabled={isBusy}
                       onClick={() => void handleApplyRoundOff('nearest')}
                     >
-                      Round to â‚¹{roundedDue} (cash)
+                      Round to ₹{roundedDue} (cash)
                     </button>
                   </div>
                 )}
@@ -1715,7 +1715,7 @@ export function BillingScreen() {
                     disabled={isBusy}
                     onClick={() => void handleApplyRoundOff('none')}
                   >
-                    Use exact â‚¹{effectiveExactDue.toFixed(2)} (UPI/card)
+                    Use exact ₹{effectiveExactDue.toFixed(2)} (UPI/card)
                   </button>
                 )}
                 <button
@@ -1741,7 +1741,7 @@ export function BillingScreen() {
                   disabled={isBusy || !isEditable}
                   onClick={() => void handleParkAndNew()}
                 >
-                  {holding ? 'Parkingâ€¦' : 'Park & new bill (F4)'}
+                  {holding ? 'Parking...' : 'Park & new bill (F4)'}
                 </button>
               </div>
             </div>
@@ -1810,7 +1810,7 @@ export function BillingScreen() {
         billLabel={transferTab?.customerName ?? 'Walk-in'}
         billMeta={
           transferTab
-            ? `${transferTab.status === BillStatus.HOLD ? 'Parked' : 'Draft'} Â· ${transferTab.itemCount} items Â· â‚¹${transferTab.grandTotal.toFixed(0)}`
+            ? `${transferTab.status === BillStatus.HOLD ? 'Parked' : 'Draft'} | ${transferTab.itemCount} items | ₹${transferTab.grandTotal.toFixed(0)}`
             : undefined
         }
         targets={onlineCounters}

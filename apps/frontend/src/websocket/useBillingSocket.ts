@@ -61,7 +61,7 @@ export function useBillingSocket(counterId?: string, onBillListChange?: () => vo
         return;
       }
       const isOtherCounter = Boolean(
-        payload.counterId && counterId && payload.counterId !== counterId,
+        payload.counterId && (!counterId || payload.counterId !== counterId),
       );
       dispatch(
         setStockAlert({
