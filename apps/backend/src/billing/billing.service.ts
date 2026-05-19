@@ -832,7 +832,7 @@ export class BillingService {
         line.productId,
         oldQty,
         bill.counterId,
-        { lineId, counterName, lineQtyHint: 0 },
+        { lineId, counterName, lineQtyHint: 0, suppressBroadcast: true },
       );
     }
 
@@ -1168,21 +1168,37 @@ export class BillingService {
   }
 
   private async mapBill(bill: BillWithItems) {
+    const billReserves = await this.redis.getBillReservations(bill.id);
+    const linesPerBatch = new Map<string, number>();
+    for (const item of bill.items) {
+      if (item.batchId) {
+        linesPerBatch.set(item.batchId, (linesPerBatch.get(item.batchId) ?? 0) + 1);
+      }
+    }
+
     const items = await Promise.all(
       bill.items.map(async (item) => {
         let availableQty: number | undefined;
         let pendingQty: number | undefined;
         let stockQty: number | undefined;
+        let reservedQty: number | undefined;
+        let shortageQty: number | undefined;
+        const lineQty = Number(item.qty);
         if (item.batchId) {
           const batch = await this.prisma.batchStock.findUnique({
             where: { id: item.batchId },
           });
           if (batch) {
-            const lineQty = Number(item.qty);
             stockQty = Number(batch.stockQty);
             pendingQty = Number(batch.pendingQty);
-            // Include this line's reservation — avoid false "short" when qty is already reserved here.
-            availableQty = stockQty - pendingQty + lineQty;
+            const billReserved = round2(billReserves[item.batchId] ?? 0);
+            if ((linesPerBatch.get(item.batchId) ?? 0) === 1) {
+              reservedQty = billReserved;
+            } else {
+              reservedQty = round2(Math.min(lineQty, billReserved));
+            }
+            shortageQty = round2(Math.max(0, lineQty - reservedQty));
+            availableQty = stockQty - pendingQty + reservedQty;
           }
         }
         return {
@@ -1192,7 +1208,7 @@ export class BillingService {
           productName: item.productName,
           batchNumber: item.batchNumber,
           hsnCode: item.hsnCode,
-          qty: Number(item.qty),
+          qty: lineQty,
           rate: Number(item.rate),
           discount: Number(item.discount),
           gstPercent: Number(item.gstPercent),
@@ -1203,6 +1219,8 @@ export class BillingService {
           stockQty,
           availableQty,
           pendingQty,
+          reservedQty,
+          shortageQty,
         };
       }),
     );

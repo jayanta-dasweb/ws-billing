@@ -32,6 +32,7 @@ import {
   useSetBillDiscountMutation,
   useSetBillRoundOffMutation,
   useUpdateLineMutation,
+  usePublishShortageAlertMutation,
   useListOnlineCountersQuery,
   useTransferBillMutation,
 } from '@/services/api/billingApi';
@@ -42,7 +43,7 @@ import {
   parseInsufficientStockAvailable,
 } from '@/utils/api';
 import { canEditBill, isOpenBillStatus } from '@/utils/canEditBill';
-import { calcShortageForAttemptedQty } from '@/utils/lineStock';
+import { calcShortageForAttemptedQty, displayLineQty } from '@/utils/lineStock';
 import { resolveCatalogScan } from '@/utils/resolveCatalogScan';
 import { getEffectiveRole } from '@/utils/roles';
 import { BillTransferModal } from './BillTransferModal';
@@ -115,6 +116,7 @@ export function BillingScreen() {
   const status = useBillingStore((s) => s.status);
   const invoiceNo = useBillingStore((s) => s.invoiceNo);
   const syncFromBill = useBillingStore((s) => s.syncFromBill);
+  const patchLineLocally = useBillingStore((s) => s.patchLineLocally);
   const clearBill = useBillingStore((s) => s.clearBill);
   const setCustomer = useBillingStore((s) => s.setCustomer);
   const user = useSelector((s: RootState) => s.auth.user);
@@ -155,6 +157,7 @@ export function BillingScreen() {
   const [resumeBill, { isLoading: resuming }] = useResumeBillMutation();
   const [completeBill, { isLoading: completing }] = useCompleteBillMutation();
   const [updateLine, { isLoading: updatingLine }] = useUpdateLineMutation();
+  const [publishShortageAlert] = usePublishShortageAlertMutation();
   const [setBillCustomer, { isLoading: settingCustomer }] = useSetBillCustomerMutation();
   const [setBillDiscount, { isLoading: settingDiscount }] = useSetBillDiscountMutation();
   const [setBillRoundOff, { isLoading: settingRoundOff }] = useSetBillRoundOffMutation();
@@ -1050,6 +1053,9 @@ export function BillingScreen() {
       if (!selectedLineId || !isEditable) return;
       const lineId = selectedLineId;
       const reqId = ++lineQtyApplyRef.current;
+      if (patch.qty !== undefined) {
+        patchLineLocally(lineId, { qty: patch.qty });
+      }
       try {
         const id = ensureBillId();
         const bill = await updateLine({ billId: id, lineId, body: patch }).unwrap();
@@ -1059,12 +1065,17 @@ export function BillingScreen() {
           setLineQtyDraft(patch.qty);
           const updated = bill.items.find((i) => i.id === lineId);
           if (updated) {
-            const short = calcShortageForAttemptedQty(patch.qty, {
-              qty: updated.qty,
-              availableQty: updated.availableQty,
-              stockQty: updated.stockQty,
-              pendingQty: updated.pendingQty,
-            });
+            const short =
+              updated.shortageQty != null && updated.shortageQty > 0.001
+                ? updated.shortageQty
+                : calcShortageForAttemptedQty(patch.qty, {
+                    qty: updated.qty,
+                    availableQty: updated.availableQty,
+                    stockQty: updated.stockQty,
+                    pendingQty: updated.pendingQty,
+                    reservedQty: updated.reservedQty,
+                    shortageQty: updated.shortageQty,
+                  });
             if (short > 0.001) {
               setLineShortageHints((prev) => ({
                 ...prev,
@@ -1089,8 +1100,36 @@ export function BillingScreen() {
         if (isInsufficientStockError(msg) && patch.qty != null) {
           setLineQtyDraft(patch.qty);
           setStockHintLineId(lineId);
-          setError(msg);
+          const line = items.find((i) => i.id === lineId);
+          const avail = line ? parseInsufficientStockAvailable(msg) : null;
+          const short =
+            avail != null && line
+              ? Math.max(0, round2(patch.qty - line.qty - avail))
+              : calcShortageForAttemptedQty(patch.qty, line ?? { qty: patch.qty });
+          if (short > 0.001) {
+            setLineShortageHints((prev) => ({
+              ...prev,
+              [lineId]: { short, attemptedQty: patch.qty! },
+            }));
+          }
+          try {
+            const id = ensureBillId();
+            await publishShortageAlert({
+              billId: id,
+              lineId,
+              attemptedQty: patch.qty!,
+            }).unwrap();
+          } catch {
+            /* WS alert is best-effort when legacy API rejects qty */
+          }
+          setError(
+            'Stock is short — qty kept on the bill; other counters are alerted. Restart the API if qty does not save.',
+          );
           return;
+        }
+        if (patch.qty !== undefined) {
+          const prior = items.find((i) => i.id === lineId);
+          if (prior) patchLineLocally(lineId, { qty: prior.qty });
         }
         setStockHintLineId(null);
         setError(msg);
@@ -1101,6 +1140,8 @@ export function BillingScreen() {
       isEditable,
       ensureBillId,
       updateLine,
+      publishShortageAlert,
+      patchLineLocally,
       syncFromBill,
       refetchTabs,
       dismissIfBillClosed,
@@ -1376,7 +1417,17 @@ export function BillingScreen() {
                             <small className="d-block text-muted">{item.batchNumber}</small>
                           ) : null}
                         </td>
-                        <td className="text-right">{item.qty}</td>
+                        <td className="text-right">
+                          {displayLineQty(item, {
+                            selectedLineId,
+                            lineQtyDraft,
+                            attemptedQty:
+                              lineShortageHints[item.id]?.attemptedQty ??
+                              (item.shortageQty != null && item.shortageQty > 0
+                                ? item.qty
+                                : undefined),
+                          })}
+                        </td>
                         <td>
                           <LineStockIndicators
                             billId={billId}
@@ -1384,7 +1435,11 @@ export function BillingScreen() {
                             batchId={item.batchId}
                             batchNumber={item.batchNumber}
                             productName={item.productName}
-                            lineQty={item.qty}
+                            lineQty={displayLineQty(item, {
+                              selectedLineId,
+                              lineQtyDraft,
+                              attemptedQty: lineShortageHints[item.id]?.attemptedQty,
+                            })}
                             availableQty={item.availableQty}
                             pendingQty={item.pendingQty}
                             stockQty={item.stockQty}
@@ -1450,7 +1505,9 @@ export function BillingScreen() {
                     value={lineQtyDraft ?? selectedLine.qty}
                     onChange={(qty) => {
                       setLineQtyDraft(qty);
-                      applyQtyShortageHint(selectedLineId, selectedLine, qty);
+                      if (selectedLineId) {
+                        applyQtyShortageHint(selectedLineId, selectedLine, qty);
+                      }
                     }}
                     onAfterBlur={(qty) => {
                       void commitLineQty(qty);
@@ -1513,9 +1570,10 @@ export function BillingScreen() {
                 {selectedLineId && lineShortageHints[selectedLineId]?.short > 0 && (
                   <p className="billing-line-edit__short-warn small mb-0 mt-2" role="alert">
                     <i className="fas fa-triangle-exclamation mr-1" aria-hidden />
-                    Tried {lineShortageHints[selectedLineId].attemptedQty} — short by{' '}
-                    <strong>{lineShortageHints[selectedLineId].short}</strong>. Click{' '}
-                    <strong>Done</strong> to alert all counters (red row + SHORT badge).
+                    Need {lineShortageHints[selectedLineId].attemptedQty} — short by{' '}
+                    <strong>{lineShortageHints[selectedLineId].short}</strong>. Press Tab or{' '}
+                    <strong>Done</strong> to save qty and alert all counters
+                    {wsConnected ? '' : ' (Live off — check Redis & API)'}.
                   </p>
                 )}
               </div>

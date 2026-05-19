@@ -138,6 +138,8 @@ export function lineItemHasShortage(
     availableQty?: number;
     stockQty?: number;
     pendingQty?: number;
+    reservedQty?: number;
+    shortageQty?: number;
   },
   shortageHints?: Record<string, { short: number }>,
   batchAlert?: BatchShortageAlert | null,

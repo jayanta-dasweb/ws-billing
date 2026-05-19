@@ -40,6 +40,10 @@ export interface BillLineDto {
   pendingQty?: number;
   /** Max qty this line can hold: stock − pending + this line qty. */
   availableQty?: number;
+  /** Units reserved on this bill for this batch (from Redis session). */
+  reservedQty?: number;
+  /** Units on the line not covered by reservation (line qty − reserved). */
+  shortageQty?: number;
 }
 
 export interface BillPaymentDto {

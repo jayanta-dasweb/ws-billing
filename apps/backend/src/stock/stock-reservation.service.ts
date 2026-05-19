@@ -73,7 +73,13 @@ export class StockReservationService {
     productId: string,
     qty: number,
     counterId?: string,
-    meta?: { lineId?: string; counterName?: string; lineQtyHint?: number },
+    meta?: {
+      lineId?: string;
+      counterName?: string;
+      lineQtyHint?: number;
+      /** Skip pub/sub when release is an intermediate step (e.g. before re-reserve on qty change). */
+      suppressBroadcast?: boolean;
+    },
   ) {
     const batch = await this.prisma.batchStock.update({
       where: { id: batchId },
@@ -81,14 +87,17 @@ export class StockReservationService {
     });
     await this.redis.adjustPendingQty(batchId, -qty);
     await this.redis.trackBillReservation(billId, batchId, -qty);
-    await this.broadcast(batchId, productId, batch, {
-      billId,
-      counterId,
-      lineId: meta?.lineId,
-      counterName: meta?.counterName,
-      lineQtyHint: meta?.lineQtyHint ?? 0,
-      attemptedQty: 0,
-    });
+    if (!meta?.suppressBroadcast) {
+      await this.broadcast(batchId, productId, batch, {
+        billId,
+        counterId,
+        lineId: meta?.lineId,
+        counterName: meta?.counterName,
+        lineQtyHint: meta?.lineQtyHint ?? 0,
+        attemptedQty: 0,
+        shortageQty: 0,
+      });
+    }
     return batch;
   }
 

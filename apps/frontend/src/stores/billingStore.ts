@@ -41,6 +41,10 @@ export interface BillingLineItem {
 
   pendingQty?: number;
 
+  reservedQty?: number;
+
+  shortageQty?: number;
+
 }
 
 
@@ -94,6 +98,8 @@ interface BillingState {
   isDirty: boolean;
 
   syncFromBill: (bill: BillDto) => void;
+
+  patchLineLocally: (lineId: string, patch: Partial<BillingLineItem>) => void;
 
   clearBill: () => void;
 
@@ -280,6 +286,10 @@ export const useBillingStore = create<BillingState>()(
 
             pendingQty: i.pendingQty,
 
+            reservedQty: i.reservedQty,
+
+            shortageQty: i.shortageQty,
+
           })),
 
           isDirty: false,
@@ -294,7 +304,14 @@ export const useBillingStore = create<BillingState>()(
 
       },
 
-
+      patchLineLocally: (lineId, patch) => {
+        set((state) => ({
+          items: state.items.map((line) =>
+            line.id === lineId ? { ...line, ...patch } : line,
+          ),
+          isDirty: true,
+        }));
+      },
 
       clearBill: () => {
 
