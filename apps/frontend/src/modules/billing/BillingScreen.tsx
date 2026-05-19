@@ -1477,6 +1477,7 @@ export function BillingScreen() {
                             availableQty={item.availableQty}
                             pendingQty={item.pendingQty}
                             stockQty={item.stockQty}
+                            reservedQty={item.reservedQty}
                             forceDetails={item.id === stockHintLineId}
                             shortageOverride={
                               lineShortageHints[item.id]?.short ?? batchAlert?.shortageQty

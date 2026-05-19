@@ -11,18 +11,25 @@ export interface LineStockInputs {
   shortageQty?: number;
 }
 
-/** Max qty this line can hold (pool + own reservation). */
-export function calcLineSellable({
-  qty,
+/** Free units in the batch (warehouse pool not reserved on any open bill). */
+export function calcPoolAvailable({
   availableQty,
   stockQty,
   pendingQty,
 }: LineStockInputs): number | null {
   if (stockQty != null && pendingQty != null) {
-    return round2(stockQty - pendingQty + qty);
+    return round2(Math.max(0, stockQty - pendingQty));
   }
-  if (availableQty != null) return availableQty;
+  if (availableQty != null) return round2(Math.max(0, availableQty));
   return null;
+}
+
+/** Max qty this line can still take from pool (pool + already reserved on this line). */
+export function calcLineSellable(inputs: LineStockInputs): number | null {
+  const pool = calcPoolAvailable(inputs);
+  if (pool == null) return null;
+  const reserved = inputs.reservedQty ?? 0;
+  return round2(pool + reserved);
 }
 
 export function calcLineShortage(inputs: LineStockInputs): number {

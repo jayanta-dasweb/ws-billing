@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useLiveBatchStock } from '@/hooks/useLiveBatchStock';
 import type { BatchShortageAlert } from '@/redux/slices/stockSlice';
 import { anyBatchShortage } from '@/utils/batchShortageAlerts';
-import { batchShortageAppliesToLine, calcLineShortage } from '@/utils/lineStock';
+import { batchShortageAppliesToLine, calcLineShortage, calcPoolAvailable } from '@/utils/lineStock';
 import { StockMetricsInline } from './StockMetrics';
 import { BatchStockHoldModal } from './BatchStockHoldModal';
 
@@ -16,6 +16,8 @@ interface LineStockIndicatorsProps {
   availableQty?: number;
   pendingQty?: number;
   stockQty?: number;
+  /** Units reserved on this bill for this line (not whole-batch pending). */
+  reservedQty?: number;
   /** Open details modal after failed qty (shortage). */
   forceDetails?: boolean;
   /** When API rejects a higher qty, show shortfall for what user tried. */
@@ -39,6 +41,7 @@ export function LineStockIndicators({
   availableQty,
   pendingQty,
   stockQty,
+  reservedQty,
   forceDetails,
   shortageOverride,
   attemptedQty,
@@ -54,6 +57,7 @@ export function LineStockIndicators({
     availableQty: live.availableQty ?? availableQty,
     stockQty: live.stockQty ?? stockQty,
     pendingQty: live.pendingQty ?? pendingQty,
+    reservedQty,
   };
   const computedShort = calcLineShortage(stockInputs);
   const batchAlertApplies = batchShortageAppliesToLine(batchShortageAlert, {
@@ -70,10 +74,8 @@ export function LineStockIndicators({
         : computedShort;
   const hasShort = shortage > 0.001;
   const triedQty = attemptedQty ?? (batchAlertApplies ? batchShortageAlert?.attemptedQty : undefined);
-  const sellable =
-    live.stockQty != null && live.pendingQty != null
-      ? live.stockQty - live.pendingQty + lineQty
-      : availableQty;
+  const poolAvail = calcPoolAvailable(stockInputs);
+  const lineReserved = reservedQty ?? 0;
 
   useEffect(() => {
     if (forceDetails && hasShort && batchId) {
@@ -86,8 +88,8 @@ export function LineStockIndicators({
       <div className="line-stock-indicators">
         <StockMetricsInline
           batchId={batchId}
-          available={sellable}
-          reserved={live.pendingQty ?? pendingQty}
+          available={poolAvail}
+          reserved={lineReserved > 0.001 ? lineReserved : null}
           short={null}
           live={live.isLive}
           variant="light"

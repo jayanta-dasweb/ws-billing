@@ -38,7 +38,7 @@ export interface BillLineDto {
   stockQty?: number;
   /** Total reserved (all open bills). */
   pendingQty?: number;
-  /** Max qty this line can hold: stock − pending + this line qty. */
+  /** Free pool in batch: stock − pending (all open bills). */
   availableQty?: number;
   /** Units reserved on this bill for this batch (from Redis session). */
   reservedQty?: number;

@@ -1214,7 +1214,8 @@ export class BillingService {
               reservedQty = round2(Math.min(lineQty, billReserved));
             }
             shortageQty = round2(Math.max(0, lineQty - reservedQty));
-            availableQty = stockQty - pendingQty + reservedQty;
+            /** Free pool in batch (not including this line's qty). */
+            availableQty = round2(Math.max(0, stockQty - pendingQty));
           }
         }
         return {
