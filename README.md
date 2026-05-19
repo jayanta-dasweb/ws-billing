@@ -153,7 +153,7 @@ npm run prisma:seed -w @billing/backend   # Demo users & masters
 
 ## Project layout
 
-.
+```
 ├── ./ws-billing/                          # Monorepo root (npm workspaces)
 ├── ./├── .env.example                     # Env template → copy to .env
 ├── ./├── .gitignore
@@ -234,7 +234,7 @@ npm run prisma:seed -w @billing/backend   # Demo users & masters
 ├── ./│   └── nginx.conf                   # Reverse proxy (Docker full stack)
 └── ./└── docs/
     └── ./└── docs/└── ARCHITECTURE.md              # Design notes
-
+```
 ---
 
 ## Troubleshooting
