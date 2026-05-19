@@ -22,6 +22,8 @@ export interface BatchStockHoldModalProps {
   productName?: string;
   lineQty?: number;
   shortageQty?: number;
+  /** Qty the alerting counter tried to sell (may be higher than reserved on their line). */
+  attemptedQty?: number;
   alertCounterName?: string;
   onClose: () => void;
 }
@@ -33,6 +35,7 @@ export function BatchStockHoldModal({
   productName,
   lineQty,
   shortageQty,
+  attemptedQty,
   alertCounterName,
   onClose,
 }: BatchStockHoldModalProps) {
@@ -113,9 +116,24 @@ export function BatchStockHoldModal({
                     Short by <strong>{shortageQty}</strong>
                   </>
                 )}
-                {lineQty != null
-                  ? ` — needs ${lineQty}, only ${round2(Math.max(0, lineQty - (shortageQty ?? 0)))} can be sold`
-                  : ''}
+                {(() => {
+                  const tried = attemptedQty ?? lineQty;
+                  if (tried == null) return null;
+                  const canSell = round2(Math.max(0, tried - (shortageQty ?? 0)));
+                  return (
+                    <>
+                      {' '}
+                      — tried <strong>{tried}</strong>, only <strong>{canSell}</strong> can be sold
+                      {alertCounterName && attemptedQty != null && lineQty != null && attemptedQty > lineQty + 0.005 ? (
+                        <>
+                          {' '}
+                          · <strong>{alertCounterName}</strong> bill line: <strong>{lineQty}</strong>{' '}
+                          reserved (not {attemptedQty})
+                        </>
+                      ) : null}
+                    </>
+                  );
+                })()}
               </span>
             </div>
           )}
@@ -137,7 +155,9 @@ export function BatchStockHoldModal({
 
           {segments.length > 0 && (
             <div className="batch-hold-modal__bar-wrap">
-              <span className="batch-hold-modal__bar-label">Split by counter</span>
+              <span className="batch-hold-modal__bar-label">
+                Reserved on open bills (draft / parked)
+              </span>
               <div className="batch-hold-modal__bar" role="img" aria-hidden>
                 {segments.map((s) => (
                   <span

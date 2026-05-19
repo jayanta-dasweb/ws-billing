@@ -61,8 +61,7 @@ export function LineStockIndicators({
         ? wsShort
         : computedShort;
   const hasShort = shortage > 0.001;
-  const modalLineQty =
-    attemptedQty ?? batchShortageAlert?.attemptedQty ?? lineQty;
+  const triedQty = attemptedQty ?? batchShortageAlert?.attemptedQty;
   const sellable =
     live.stockQty != null && live.pendingQty != null
       ? live.stockQty - live.pendingQty + lineQty
@@ -112,8 +111,9 @@ export function LineStockIndicators({
           batchId={batchId}
           batchNumber={batchNumber}
           productName={productName}
-          lineQty={modalLineQty}
+          lineQty={lineQty}
           shortageQty={hasShort ? shortage : undefined}
+          attemptedQty={triedQty}
           alertCounterName={batchShortageAlert?.counterName}
           onClose={() => setModalOpen(false)}
         />
