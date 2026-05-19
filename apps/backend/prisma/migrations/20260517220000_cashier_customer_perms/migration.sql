@@ -1,5 +1,4 @@
--- Allow cashiers to search/create customers from billing (permission-gated, no ADMIN role required)
-INSERT INTO `role_permissions` (`role_id`, `permission_code`, `created_at`) VALUES
-('role-cashier', 'master.customer.view', NOW(3)),
-('role-cashier', 'master.customer.create', NOW(3))
-ON DUPLICATE KEY UPDATE `created_at` = `created_at`;
+-- Cashier customer permissions are granted in `prisma/seed.ts` (seedRbac).
+-- Originally this INSERT ran here, but `role_permissions` / `role-cashier` are created
+-- in later migrations (phase35 + spatie_rbac), which caused P3009 on fresh `migrate deploy`.
+-- Kept as an empty migration to preserve history ordering.
