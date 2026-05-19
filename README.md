@@ -120,6 +120,15 @@ cd ../..
 > Use **`prisma migrate deploy`** for setup/review (not `migrate dev`).  
 > `migrate dev` needs `SHADOW_DATABASE_URL` and is for developers changing the schema.
 
+**Fresh / empty database** (no tables, login says `users` does not exist): use **`prisma:deploy`**, not `prisma:recover`:
+
+```bash
+npm run prisma:deploy
+npm run prisma:seed
+```
+
+Or one command: `npm run prisma:setup` (generate + deploy + seed).
+
 **If `prisma:deploy` fails with P3009** (failed migration `20260517220000_cashier_customer_perms`): pull latest `main`, then from **repo root**:
 
 ```bash
@@ -128,7 +137,7 @@ npm run prisma:recover
 npm run prisma:seed
 ```
 
-`prisma:recover` marks the failed migration rolled back and runs `migrate deploy` (keeps other data if any).
+`prisma:recover` runs `migrate deploy` first; only if P3009 is detected does it mark the failed migration rolled back and deploy again. On an empty DB it behaves like `prisma:deploy`.
 
 **Fresh dev DB (simplest):** wipe and re-apply (deletes all MySQL data in `billing_db`):
 
@@ -260,11 +269,12 @@ npm run build               # Production build (shared + backend + frontend)
 npm run docker:up           # docker compose up -d
 npm run docker:down         # docker compose down
 npm run build:shared        # Build packages/shared (also runs on npm install)
+npm run prisma:setup        # generate + deploy + seed (first-time DB setup)
 npm run prisma:generate     # Regenerate Prisma Client
-npm run prisma:deploy       # Apply migrations (production / fresh DB)
+npm run prisma:deploy       # Apply migrations (creates all tables)
 npm run prisma:migrate      # Create migration (dev only, needs shadow DB)
 npm run prisma:seed         # Demo users, roles, counters, sample data
-npm run prisma:recover      # Fix P3009 failed migration, then deploy
+npm run prisma:recover      # deploy; if P3009 only, clear failed migration and redeploy
 npm run prisma:reset        # Drop DB + re-apply all migrations (dev only, needs .env)
 ```
 
@@ -367,7 +377,9 @@ ws-billing/                          # Monorepo root (npm workspaces)
 | **DB connection refused** | `docker compose up -d mysql redis` → wait until `docker compose ps` shows mysql **healthy** |
 | **Prisma / `@prisma/client` error** | From repo root: `npm run prisma:generate` |
 | **Migrations failed (connection)** | Ensure MySQL is up; then `npm run prisma:deploy` from repo root |
+| **No tables / `users` does not exist** | Migrations not applied. From repo root: `npm run prisma:deploy` then `npm run prisma:seed` (or `npm run prisma:setup`) |
 | **P3009 — failed migration in DB** | `git pull` → `npm run prisma:recover` → `npm run prisma:seed`. Or dev wipe: `npm run prisma:reset` then `npm run prisma:seed` |
+| **`prisma:recover` — no migrations table** | DB is empty — use `npm run prisma:deploy` then `npm run prisma:seed`, not recover |
 | **`DATABASE_URL` not found (P1012)** | You ran `npx prisma …` without loading root `.env`. Use **repo root** `npm run prisma:*` or `npx dotenv -e ../../.env -- prisma …` from `apps/backend` |
 | **Empty login / no admin** | From repo root: `npm run prisma:seed` |
 | **`migrate dev` shadow DB error** | Use `npm run prisma:deploy` for setup, or set `SHADOW_DATABASE_URL` in `.env` |

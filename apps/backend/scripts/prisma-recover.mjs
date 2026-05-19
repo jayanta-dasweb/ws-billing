@@ -1,6 +1,6 @@
 /**
- * Recover from P3009 (failed migration) after pulling the migration-order fix.
- * Loads repo-root .env and runs: migrate resolve --rolled-back → migrate deploy
+ * Apply migrations; if P3009 (failed migration), mark rolled back and deploy again.
+ * For a completely empty DB, only `migrate deploy` runs (no resolve step).
  */
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 const backendDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = resolve(backendDir, '../..');
 const envPath = resolve(repoRoot, '.env');
+const FAILED_MIGRATION = '20260517220000_cashier_customer_perms';
 
 function loadEnvFile(path) {
   let raw;
@@ -36,24 +37,56 @@ function loadEnvFile(path) {
   }
 }
 
-function runPrisma(args) {
+function runPrisma(args, { allowFail = false } = {}) {
   const result = spawnSync('npx', ['prisma', ...args], {
     cwd: backendDir,
-    stdio: 'inherit',
+    stdio: 'pipe',
     shell: true,
     env: process.env,
+    encoding: 'utf8',
   });
-  if (result.status !== 0) process.exit(result.status ?? 1);
+  const out = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  if (out) process.stdout.write(out);
+  if (!allowFail && result.status !== 0) {
+    return { ok: false, output: out, status: result.status ?? 1 };
+  }
+  return { ok: result.status === 0, output: out, status: result.status ?? 0 };
 }
-
-const FAILED_MIGRATION = '20260517220000_cashier_customer_perms';
 
 loadEnvFile(envPath);
 
-console.log('Marking failed migration as rolled back:', FAILED_MIGRATION);
-runPrisma(['migrate', 'resolve', '--rolled-back', FAILED_MIGRATION]);
+console.log('Applying database migrations (prisma migrate deploy)…');
+let deploy = runPrisma(['migrate', 'deploy'], { allowFail: true });
 
-console.log('Applying pending migrations…');
-runPrisma(['migrate', 'deploy']);
+if (deploy.ok) {
+  console.log('\nMigrations applied. Run from repo root: npm run prisma:seed');
+  process.exit(0);
+}
+
+const isP3009 =
+  deploy.output.includes('P3009') ||
+  deploy.output.includes('failed migrations') ||
+  deploy.output.includes(FAILED_MIGRATION);
+
+if (!isP3009) {
+  console.error('\nMigrate deploy failed. Fix the error above (MySQL running? .env DATABASE_URL correct?).');
+  process.exit(deploy.status || 1);
+}
+
+console.log('\nDetected failed migration (P3009). Marking as rolled back:', FAILED_MIGRATION);
+const resolve = runPrisma(['migrate', 'resolve', '--rolled-back', FAILED_MIGRATION]);
+if (!resolve.ok) {
+  console.error(
+    '\nCould not resolve failed migration. For a fresh empty database use:\n' +
+      '  npm run prisma:deploy\n' +
+      '  npm run prisma:seed\n' +
+      'From repo root — not prisma:recover.',
+  );
+  process.exit(resolve.status || 1);
+}
+
+console.log('Re-applying migrations…');
+deploy = runPrisma(['migrate', 'deploy']);
+if (!deploy.ok) process.exit(deploy.status || 1);
 
 console.log('\nRecovery complete. Run from repo root: npm run prisma:seed');

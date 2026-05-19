@@ -22,6 +22,7 @@
     "prisma:seed": "npm run prisma:seed -w @billing/backend",
     "prisma:reset": "npm run prisma:reset -w @billing/backend",
     "prisma:recover": "npm run prisma:recover -w @billing/backend",
+    "prisma:setup": "npm run prisma:generate && npm run prisma:deploy && npm run prisma:seed",
     "smoke:billing": "node apps/backend/scripts/smoke-billing.mjs"
   },
   "devDependencies": {
