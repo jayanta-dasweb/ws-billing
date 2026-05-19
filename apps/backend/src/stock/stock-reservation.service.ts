@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
-import type { BatchStockSnapshot } from '@billing/shared';
+import { BillStatus, type BatchStockSnapshot } from '@billing/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 @Injectable()
@@ -29,6 +29,7 @@ export class StockReservationService {
     qty: number,
     counterId?: string,
     lineQtyHint?: number,
+    opts?: { suppressBroadcast?: boolean },
   ) {
     const batch = await this.prisma.$transaction(async (tx) => {
       const rows = await tx.$queryRaw<
@@ -63,11 +64,13 @@ export class StockReservationService {
 
     await this.redis.syncPendingQty(batchId, Number(batch.pendingQty));
     await this.redis.trackBillReservation(billId, batchId, qty);
-    await this.broadcast(batchId, productId, batch, {
-      billId,
-      counterId,
-      shortageQty: 0,
-    });
+    if (!opts?.suppressBroadcast) {
+      await this.broadcast(batchId, productId, batch, {
+        billId,
+        counterId,
+        shortageQty: 0,
+      });
+    }
     return batch;
   }
 
@@ -85,9 +88,16 @@ export class StockReservationService {
       suppressBroadcast?: boolean;
     },
   ) {
-    const batch = await this.prisma.batchStock.update({
-      where: { id: batchId },
-      data: { pendingQty: { decrement: qty } },
+    const batch = await this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<{ pending_qty: Prisma.Decimal }[]>`
+        SELECT pending_qty FROM batch_stock WHERE id = ${batchId} FOR UPDATE
+      `;
+      const pending = Number(rows[0]?.pending_qty ?? 0);
+      const nextPending = Math.max(0, pending - qty);
+      return tx.batchStock.update({
+        where: { id: batchId },
+        data: { pendingQty: nextPending },
+      });
     });
     await this.redis.syncPendingQty(batchId, Number(batch.pendingQty));
     await this.redis.trackBillReservation(billId, batchId, -qty);
@@ -121,8 +131,150 @@ export class StockReservationService {
       Number(batch.stockQty) - Number(batch.pendingQty),
     );
     if (available <= 0.001) return 0;
-    await this.reserve(batchId, billId, productId, available, counterId, lineQtyHint);
+    await this.reserve(batchId, billId, productId, available, counterId, lineQtyHint, {
+      suppressBroadcast: true,
+    });
     return available;
+  }
+
+  /**
+   * Split batch pending across open lines (FIFO by bill update, then line sort).
+   * Returns reserved units per line id.
+   */
+  /** Reserved qty per open bill line on this batch (from DB pending, FIFO). */
+  async getBatchLineAllocation(batchId: string): Promise<Map<string, number>> {
+    const openItems = await this.prisma.billItem.findMany({
+      where: {
+        batchId,
+        bill: { status: { in: [BillStatus.DRAFT, BillStatus.HOLD] } },
+      },
+      select: { id: true, billId: true, qty: true },
+      orderBy: [{ bill: { updatedAt: 'asc' } }, { sortOrder: 'asc' }],
+    });
+    const batch = await this.prisma.batchStock.findUnique({ where: { id: batchId } });
+    return this.allocatePendingToOpenLines(
+      openItems.map((i) => ({ id: i.id, billId: i.billId, qty: Number(i.qty) })),
+      Number(batch?.pendingQty ?? 0),
+    );
+  }
+
+  private batchPoolQty(batch: { stockQty: Prisma.Decimal; pendingQty: Prisma.Decimal }): number {
+    return Math.max(0, Number(batch.stockQty) - Number(batch.pendingQty));
+  }
+
+  allocatePendingToOpenLines(
+    items: { id: string; billId: string; qty: number }[],
+    totalPending: number,
+  ): Map<string, number> {
+    const out = new Map<string, number>();
+    let left = Math.max(0, totalPending);
+    for (const item of items) {
+      const want = Number(item.qty);
+      const take = Math.min(want, left);
+      out.set(item.id, Math.round(take * 1000) / 1000);
+      left = Math.max(0, left - take);
+    }
+    return out;
+  }
+
+  /**
+   * After pool changes: top up DB reservations, sync Redis mirrors, WS publish per line.
+   */
+  async reconcileBatchOpenLines(batchId: string, productId: string) {
+    const openItems = await this.prisma.billItem.findMany({
+      where: {
+        batchId,
+        bill: { status: { in: [BillStatus.DRAFT, BillStatus.HOLD] } },
+      },
+      include: {
+        bill: { include: { counter: { select: { id: true, name: true } } } },
+      },
+      orderBy: [{ bill: { updatedAt: 'asc' } }, { sortOrder: 'asc' }],
+    });
+
+    let batch = await this.prisma.batchStock.findUnique({ where: { id: batchId } });
+    if (!batch) return;
+
+    let allocation = this.allocatePendingToOpenLines(
+      openItems.map((i) => ({ id: i.id, billId: i.billId, qty: Number(i.qty) })),
+      Number(batch.pendingQty),
+    );
+
+    for (const item of openItems) {
+      const lineQty = Number(item.qty);
+      if (lineQty <= 0.001) continue;
+      const have = allocation.get(item.id) ?? 0;
+      const gap = lineQty - have;
+      if (gap <= 0.001) continue;
+      const counterName = item.bill.counter?.name ?? 'Counter';
+      try {
+        await this.reserve(
+          batchId,
+          item.billId,
+          productId,
+          gap,
+          item.bill.counterId,
+          lineQty,
+          { suppressBroadcast: true },
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!msg.includes('Insufficient stock')) throw e;
+        await this.reserveAvailable(
+          batchId,
+          item.billId,
+          productId,
+          item.bill.counterId,
+          lineQty,
+          { lineId: item.id, counterName },
+        );
+      }
+    }
+
+    batch = await this.prisma.batchStock.findUnique({ where: { id: batchId } });
+    if (!batch) return;
+
+    await this.redis.syncPendingQty(batchId, Number(batch.pendingQty));
+
+    allocation = this.allocatePendingToOpenLines(
+      openItems.map((i) => ({ id: i.id, billId: i.billId, qty: Number(i.qty) })),
+      Number(batch.pendingQty),
+    );
+
+    const billTotals = new Map<string, number>();
+    for (const item of openItems) {
+      const reservedForLine = allocation.get(item.id) ?? 0;
+      billTotals.set(item.billId, (billTotals.get(item.billId) ?? 0) + reservedForLine);
+      await this.publishLineStockState(batchId, productId, {
+        billId: item.billId,
+        lineId: item.id,
+        counterId: item.bill.counterId,
+        counterName: item.bill.counter?.name ?? 'Counter',
+        lineQty: Number(item.qty),
+        reservedForLine,
+      });
+    }
+
+    for (const [billId, total] of billTotals) {
+      await this.redis.setBillBatchReservation(billId, batchId, total);
+    }
+
+    const pool = this.batchPoolQty(batch);
+    if (pool > 0.001) {
+      for (const item of openItems) {
+        await this.redis.clearEphemeralShortage(batchId, item.billId, item.id);
+        await this.broadcast(batchId, productId, batch, {
+          billId: item.billId,
+          lineId: item.id,
+          counterId: item.bill.counterId,
+          counterName: item.bill.counter?.name ?? 'Counter',
+          lineQtyHint: Number(item.qty),
+          attemptedQty: Number(item.qty),
+          shortageQty: 0,
+          ephemeralShortage: false,
+        });
+      }
+    }
   }
 
   /** After line qty change: broadcast pool + shortage (or clear shortage) to all counters. */
@@ -141,7 +293,11 @@ export class StockReservationService {
   ) {
     const batch = await this.prisma.batchStock.findUnique({ where: { id: batchId } });
     if (!batch) throw new NotFoundException('Batch not found');
-    const shortageQty = Math.max(0, opts.lineQty - opts.reservedForLine);
+    const pool = this.batchPoolQty(batch);
+    let shortageQty = Math.max(0, opts.lineQty - opts.reservedForLine);
+    if (pool > 0.001) {
+      shortageQty = 0;
+    }
     const now = new Date().toISOString();
     if (shortageQty > 0.001) {
       await this.redis.setEphemeralShortage({
@@ -282,6 +438,8 @@ export class StockReservationService {
         ephemeral: true,
         updatedAt: new Date().toISOString(),
       });
+    } else {
+      await this.redis.clearEphemeralShortage(batchId, opts.billId, opts.lineId);
     }
     await this.broadcast(batchId, productId, batch, {
       billId: opts.billId,
@@ -293,5 +451,6 @@ export class StockReservationService {
       shortageQty,
       ephemeralShortage: shortageQty > 0.001,
     });
+    await this.reconcileBatchOpenLines(batchId, productId);
   }
 }

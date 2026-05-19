@@ -123,7 +123,13 @@ export function BatchStockHoldModal({
                   return (
                     <>
                       {' '}
-                      — tried <strong>{tried}</strong>, only <strong>{canSell}</strong> can be sold
+                      — line qty <strong>{tried}</strong>, reserved <strong>{canSell}</strong>
+                      {(shortageQty ?? 0) > 0.001 ? (
+                        <>
+                          {' '}
+                          (short <strong>{shortageQty}</strong>)
+                        </>
+                      ) : null}
                       {alertCounterName && attemptedQty != null && lineQty != null && attemptedQty > lineQty + 0.005 ? (
                         <>
                           {' '}

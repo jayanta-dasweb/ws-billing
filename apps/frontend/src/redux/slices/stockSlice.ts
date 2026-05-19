@@ -37,6 +37,18 @@ const stockSlice = createSlice({
       const p = action.payload;
       state.batches[p.batchId] = p;
       state.lastUpdated = new Date().toISOString();
+      const pool =
+        p.availableQty != null
+          ? p.availableQty
+          : p.stockQty != null && p.pendingQty != null
+            ? Math.max(0, p.stockQty - p.pendingQty)
+            : null;
+      if (pool != null && pool > 0.001) {
+        for (const [key, alert] of Object.entries(state.batchShortageAlerts)) {
+          if (alert.batchId === p.batchId) delete state.batchShortageAlerts[key];
+        }
+        return;
+      }
       const key = shortageAlertKey({
         batchId: p.batchId,
         billId: p.billId,
@@ -76,6 +88,12 @@ const stockSlice = createSlice({
         if (alert.billId === billId) delete state.batchShortageAlerts[key];
       }
     },
+    clearShortageAlertsForBatch(state, action: PayloadAction<string>) {
+      const batchId = action.payload;
+      for (const [key, alert] of Object.entries(state.batchShortageAlerts)) {
+        if (alert.batchId === batchId) delete state.batchShortageAlerts[key];
+      }
+    },
     setBatchStocks(state, action: PayloadAction<StockPendingUpdatedPayload[]>) {
       for (const batch of action.payload) {
         state.batches[batch.batchId] = batch;
@@ -91,5 +109,6 @@ export const {
   clearBatchShortageAlert,
   clearShortageAlertForLine,
   clearShortageAlertsForBill,
+  clearShortageAlertsForBatch,
 } = stockSlice.actions;
 export default stockSlice.reducer;

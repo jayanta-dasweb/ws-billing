@@ -580,14 +580,7 @@ export class BillingService {
 
     await this.recalcBill(billId);
 
-    await this.reservations.publishLineStockState(batch.id, product.id, {
-      billId,
-      lineId: created.id,
-      counterId: bill.counterId,
-      counterName,
-      lineQty: qty,
-      reservedForLine,
-    });
+    await this.reservations.reconcileBatchOpenLines(batch.id, product.id);
 
     return this.getBill(billId, user);
   }
@@ -668,6 +661,7 @@ export class BillingService {
         lineQty: 0,
         reservedForLine: 0,
       });
+      await this.reservations.reconcileBatchOpenLines(line.batchId, line.productId);
     }
     await this.recalcBill(billId);
     await this.audit.activity({
@@ -933,14 +927,7 @@ export class BillingService {
 
     await this.recalcBill(billId);
 
-    await this.reservations.publishLineStockState(line.batchId, line.productId, {
-      billId,
-      lineId,
-      counterId: bill.counterId,
-      counterName,
-      lineQty: newQty,
-      reservedForLine,
-    });
+    await this.reservations.reconcileBatchOpenLines(line.batchId, line.productId);
 
     if (Math.abs(oldQty - newQty) > 0.001) {
       await this.audit.activity({
@@ -1216,13 +1203,7 @@ export class BillingService {
   }
 
   private async mapBill(bill: BillWithItems) {
-    const billReserves = await this.redis.getBillReservations(bill.id);
-    const linesPerBatch = new Map<string, number>();
-    for (const item of bill.items) {
-      if (item.batchId) {
-        linesPerBatch.set(item.batchId, (linesPerBatch.get(item.batchId) ?? 0) + 1);
-      }
-    }
+    const batchAllocationCache = new Map<string, Map<string, number>>();
 
     const items = await Promise.all(
       bill.items.map(async (item) => {
@@ -1239,15 +1220,17 @@ export class BillingService {
           if (batch) {
             stockQty = Number(batch.stockQty);
             pendingQty = Number(batch.pendingQty);
-            const billReserved = round2(billReserves[item.batchId] ?? 0);
-            if ((linesPerBatch.get(item.batchId) ?? 0) === 1) {
-              reservedQty = billReserved;
-            } else {
-              reservedQty = round2(Math.min(lineQty, billReserved));
+            if (!batchAllocationCache.has(item.batchId)) {
+              batchAllocationCache.set(
+                item.batchId,
+                await this.reservations.getBatchLineAllocation(item.batchId),
+              );
             }
-            shortageQty = round2(Math.max(0, lineQty - reservedQty));
-            /** Free pool in batch (not including this line's qty). */
+            const allocation = batchAllocationCache.get(item.batchId)!;
+            reservedQty = round2(allocation.get(item.id) ?? 0);
             availableQty = round2(Math.max(0, stockQty - pendingQty));
+            shortageQty =
+              availableQty > 0.001 ? 0 : round2(Math.max(0, lineQty - reservedQty));
           }
         }
         return {
@@ -1334,6 +1317,7 @@ export class BillingService {
         bill: { status: { in: [BillStatus.DRAFT, BillStatus.HOLD] } },
       },
       select: {
+        id: true,
         qty: true,
         bill: {
           select: {
@@ -1344,13 +1328,14 @@ export class BillingService {
       },
     });
 
+    const allocation = await this.reservations.getBatchLineAllocation(batchId);
     const byCounter = new Map<string, { counterId: string; counterName: string; reservedQty: number }>();
     for (const line of lines) {
       const cid = line.bill.counterId;
       const name = line.bill.counter?.name ?? 'Counter';
       const prev = byCounter.get(cid);
-      const add = Number(line.qty);
-      if (prev) prev.reservedQty += add;
+      const add = round2(allocation.get(line.id) ?? 0);
+      if (prev) prev.reservedQty = round2(prev.reservedQty + add);
       else byCounter.set(cid, { counterId: cid, counterName: name, reservedQty: add });
     }
 

@@ -101,7 +101,23 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async trackBillReservation(billId: string, batchId: string, qty: number): Promise<void> {
-    await this.client.hincrbyfloat(BILL_RESERVE_KEY(billId), batchId, qty);
+    const key = BILL_RESERVE_KEY(billId);
+    await this.client.hincrbyfloat(key, batchId, qty);
+    const val = await this.client.hget(key, batchId);
+    if (val != null && parseFloat(val) < 0) {
+      await this.client.hset(key, batchId, '0');
+    }
+    await this.touchBillSession(billId);
+  }
+
+  /** Replace bill's reserved qty on a batch (after reconcile). */
+  async setBillBatchReservation(billId: string, batchId: string, qty: number): Promise<void> {
+    const key = BILL_RESERVE_KEY(billId);
+    if (qty <= 0.001) {
+      await this.client.hdel(key, batchId);
+    } else {
+      await this.client.hset(key, batchId, String(qty));
+    }
     await this.touchBillSession(billId);
   }
 

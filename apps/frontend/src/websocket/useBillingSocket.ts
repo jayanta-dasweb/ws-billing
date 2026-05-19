@@ -9,7 +9,7 @@ import {
   type StockFailedPayload,
   type StockPendingUpdatedPayload,
 } from '@billing/shared';
-import { updateBatchStock } from '@/redux/slices/stockSlice';
+import { clearShortageAlertsForBatch, updateBatchStock } from '@/redux/slices/stockSlice';
 import {
   setConnected,
   setLastEvent,
@@ -57,24 +57,20 @@ export function useBillingSocket(counterId?: string, onBillListChange?: () => vo
     socket.on(WsEvent.STOCK_PENDING_UPDATED, (payload: StockPendingUpdatedPayload) => {
       dispatch(updateBatchStock(payload));
       dispatch(setLastEvent(WsEvent.STOCK_PENDING_UPDATED));
-      if (payload.shortageQty == null || payload.shortageQty <= 0.001) {
+      const pool =
+        payload.availableQty != null
+          ? payload.availableQty
+          : payload.stockQty != null && payload.pendingQty != null
+            ? Math.max(0, payload.stockQty - payload.pendingQty)
+            : 0;
+      if (pool > 0.001 && payload.batchId) {
+        dispatch(clearShortageAlertsForBatch(payload.batchId));
+        dispatch(setStockAlert(null));
         return;
       }
-      const isOtherCounter = Boolean(
-        payload.counterId && counterId && payload.counterId !== counterId,
-      );
-      const counterLabel = payload.counterName ?? 'Another counter';
-      dispatch(
-        setStockAlert({
-          kind: 'shortage',
-          foreignShortage: isOtherCounter,
-          message: isOtherCounter
-            ? `${counterLabel}: reserved stock — short ${payload.shortageQty} on this batch`
-            : `This bill is short ${payload.shortageQty} units — check AVAIL / RSV`,
-          billId: payload.billId ?? '',
-          batchId: payload.batchId,
-        }),
-      );
+      if (payload.batchId) {
+        dispatch(setStockAlert(null));
+      }
     });
 
     socket.on(WsEvent.STOCK_COMMITTED, (payload: StockPendingUpdatedPayload) => {

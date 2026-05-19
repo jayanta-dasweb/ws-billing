@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  BillDto,
   BillRoundOffMode,
   CatalogProductDto,
   CompleteBillDto,
@@ -43,7 +44,7 @@ import {
   parseInsufficientStockAvailable,
 } from '@/utils/api';
 import { canEditBill, isOpenBillStatus } from '@/utils/canEditBill';
-import { calcShortageForAttemptedQty, displayLineQty } from '@/utils/lineStock';
+import { calcDraftQtyShortage, calcPoolAvailable, calcShortageForAttemptedQty } from '@/utils/lineStock';
 import { resolveCatalogScan } from '@/utils/resolveCatalogScan';
 import { getEffectiveRole } from '@/utils/roles';
 import { BillTransferModal } from './BillTransferModal';
@@ -67,7 +68,11 @@ import { WsConnectionStrip } from '@/components/billing/WsConnectionStrip';
 import { BillingAlertsStrip } from '@/components/billing/OperationalGuidanceBar';
 import { BillingKeyboardHelp } from '@/components/billing/BillingKeyboardHelp';
 import { useBillReservationHeartbeat } from '@/hooks/useBillReservationHeartbeat';
-import { setBatchStocks } from '@/redux/slices/stockSlice';
+import {
+  clearShortageAlertsForBatch,
+  setBatchStocks,
+  updateBatchStock,
+} from '@/redux/slices/stockSlice';
 import {
   pickDisplayShortageAlert,
 } from '@/utils/batchShortageAlerts';
@@ -85,6 +90,39 @@ async function fetchBill(id: string) {
   );
   if ('data' in result && result.data) return result.data;
   throw new Error('Could not load bill');
+}
+
+/** Align Redux shortage alerts with server line allocation (all counters on batch). */
+function syncBatchShortageAlertsFromBill(
+  dispatch: ReturnType<typeof useDispatch>,
+  bill: BillDto,
+) {
+  const batchIds = new Set(
+    bill.items.map((i) => i.batchId).filter((id): id is string => Boolean(id)),
+  );
+  for (const batchId of batchIds) {
+    dispatch(clearShortageAlertsForBatch(batchId));
+  }
+  for (const item of bill.items) {
+    if (!item.batchId || item.stockQty == null || item.pendingQty == null) continue;
+    const pool =
+      item.availableQty ?? Math.max(0, round2(item.stockQty - item.pendingQty));
+    dispatch(
+      updateBatchStock({
+        batchId: item.batchId,
+        productId: item.productId,
+        stockQty: item.stockQty,
+        pendingQty: item.pendingQty,
+        availableQty: pool,
+        shortageQty: pool > 0.001 ? 0 : (item.shortageQty ?? 0),
+        attemptedQty: item.qty,
+        billId: bill.id,
+        lineId: item.id,
+        counterId: bill.counterId,
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+  }
 }
 
 export function BillingScreen() {
@@ -115,13 +153,13 @@ export function BillingScreen() {
   const status = useBillingStore((s) => s.status);
   const invoiceNo = useBillingStore((s) => s.invoiceNo);
   const syncFromBill = useBillingStore((s) => s.syncFromBill);
-  const patchLineLocally = useBillingStore((s) => s.patchLineLocally);
   const clearBill = useBillingStore((s) => s.clearBill);
   const setCustomer = useBillingStore((s) => s.setCustomer);
   const user = useSelector((s: RootState) => s.auth.user);
   const accessToken = useSelector((s: RootState) => s.auth.accessToken);
   const stockAlert = useSelector((s: RootState) => s.websocket.stockAlert);
   const batchShortageAlerts = useSelector((s: RootState) => s.stock.batchShortageAlerts);
+  const batchStocks = useSelector((s: RootState) => s.stock.batches);
   const wsConnected = useSelector((s: RootState) => s.websocket.connected);
   const counterId = user?.counterId;
   const isCashier = user ? getEffectiveRole(user) === UserRole.CASHIER : false;
@@ -131,9 +169,6 @@ export function BillingScreen() {
   const { message, error, setMessage, setError } = useTimedAlerts({ messageMs: 12000 });
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
   const [stockHintLineId, setStockHintLineId] = useState<string | null>(null);
-  const [lineShortageHints, setLineShortageHints] = useState<
-    Record<string, { short: number; attemptedQty: number }>
-  >({});
   const [busyMessage, setBusyMessage] = useState<string | null>(null);
   const [payOpen, setPayOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
@@ -252,12 +287,6 @@ export function BillingScreen() {
       if (stockAlert.billId === billId) {
         setError(`Stock commit failed: ${stockAlert.message}`);
       }
-    } else if (stockAlert.kind === 'shortage') {
-      if (stockAlert.foreignShortage) {
-        setMessage(stockAlert.message);
-      } else if (stockAlert.billId === billId) {
-        setMessage(stockAlert.message);
-      }
     }
     dispatch(setStockAlert(null));
   }, [stockAlert, billId, dispatch, setMessage, setError]);
@@ -270,7 +299,6 @@ export function BillingScreen() {
       items.some((item) =>
         lineItemHasShortage(
           item,
-          lineShortageHints,
           pickDisplayShortageAlert(batchShortageAlerts, item.batchId, {
             billId,
             lineId: item.id,
@@ -279,22 +307,8 @@ export function BillingScreen() {
           batchShortageAlerts,
         ),
       ),
-    [items, lineShortageHints, batchShortageAlerts, billId],
+    [items, batchShortageAlerts, billId],
   );
-
-  const foreignBatchShortages = useMemo(() => {
-    const batchesOnBill = new Set(
-      items.map((i) => i.batchId).filter((id): id is string => Boolean(id)),
-    );
-    return Object.values(batchShortageAlerts).filter(
-      (a) =>
-        a.shortageQty > 0.001 &&
-        a.counterId &&
-        counterId &&
-        a.counterId !== counterId &&
-        batchesOnBill.has(a.batchId),
-    );
-  }, [batchShortageAlerts, counterId, items]);
 
   useEffect(() => {
     if (isEditable) return;
@@ -886,12 +900,9 @@ export function BillingScreen() {
           const id = ensureBillId();
           const bill = await removeLine({ billId: id, lineId }).unwrap();
           syncFromBill(bill);
-          setLineShortageHints((prev) => {
-            if (!prev[lineId]) return prev;
-            const next = { ...prev };
-            delete next[lineId];
-            return next;
-          });
+          if (batchId) {
+            syncBatchShortageAlertsFromBill(dispatch, bill);
+          }
           if (selectedLineId === lineId) {
             setSelectedLineId(null);
             setLineQtyDraft(null);
@@ -909,6 +920,7 @@ export function BillingScreen() {
       syncFromBill,
       refetchTabs,
       isEditable,
+      dispatch,
       selectedLineId,
       runBusy,
       items,
@@ -983,6 +995,8 @@ export function BillingScreen() {
   );
 
   const deselectLine = useCallback(() => {
+    lineQtyApplyRef.current += 1;
+    setLineQtyDraft(null);
     setSelectedLineId(null);
     setProductModalOpen(false);
     setCustomerModalOpen(false);
@@ -1004,73 +1018,41 @@ export function BillingScreen() {
   const [lineDiscMode, setLineDiscMode] = useState<'amount' | 'percent'>('amount');
   const [lineQtyDraft, setLineQtyDraft] = useState<number | null>(null);
 
-  const selectedQtyHint = selectedLineId ? lineShortageHints[selectedLineId] : undefined;
-
   useEffect(() => {
     if (!selectedLineId) {
       setLineQtyDraft(null);
       return;
     }
     const line = useBillingStore.getState().items.find((i) => i.id === selectedLineId);
-    setLineQtyDraft(selectedQtyHint?.attemptedQty ?? line?.qty ?? null);
-  }, [selectedLineId, selectedQtyHint?.attemptedQty]);
+    setLineQtyDraft(line?.qty ?? null);
+  }, [selectedLineId]);
 
-  /** Drop local qty hints when line removed (WS clears shared batchShortageAlerts). */
   useEffect(() => {
-    const lineIds = new Set(items.map((i) => i.id));
+    if (!selectedLineId || lineQtyDraft == null) return;
+    const line = items.find((i) => i.id === selectedLineId);
+    if (line && Math.abs(line.qty - lineQtyDraft) < 0.001) {
+      setLineQtyDraft(line.qty);
+    }
+  }, [items, selectedLineId, lineQtyDraft]);
 
-    setLineShortageHints((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      for (const id of Object.keys(next)) {
-        if (!lineIds.has(id)) {
-          delete next[id];
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
+  const draftShortagePreview = useMemo(() => {
+    if (!selectedLine || lineQtyDraft == null) return null;
+    const short = calcDraftQtyShortage(lineQtyDraft, {
+      qty: selectedLine.qty,
+      availableQty: selectedLine.availableQty,
+      stockQty: selectedLine.stockQty,
+      pendingQty: selectedLine.pendingQty,
+      reservedQty: selectedLine.reservedQty,
     });
-
-    // batchShortageAlerts: only cleared by WebSocket when server resolves shortage (qty down / line removed).
-  }, [items, dispatch]);
-
-  const applyQtyShortageHint = useCallback(
-    (
-      lineId: string,
-      line: { qty: number; availableQty?: number; stockQty?: number; pendingQty?: number },
-      attemptedQty: number,
-    ) => {
-      let short = calcShortageForAttemptedQty(attemptedQty, {
-        qty: line.qty,
-        availableQty: line.availableQty,
-        stockQty: line.stockQty,
-        pendingQty: line.pendingQty,
-      });
-      if (short > 0) {
-        setLineShortageHints((prev) => ({
-          ...prev,
-          [lineId]: { short, attemptedQty },
-        }));
-      } else {
-        setLineShortageHints((prev) => {
-          if (!prev[lineId]) return prev;
-          const next = { ...prev };
-          delete next[lineId];
-          return next;
-        });
-      }
-    },
-    [],
-  );
+    if (short <= 0.001) return null;
+    return { short, attemptedQty: lineQtyDraft };
+  }, [selectedLine, lineQtyDraft]);
 
   const applyLineUpdate = useCallback(
     async (patch: { qty?: number; discount?: number; discountPercent?: number }) => {
       if (!selectedLineId || !isEditable) return;
       const lineId = selectedLineId;
       const reqId = ++lineQtyApplyRef.current;
-      if (patch.qty !== undefined) {
-        patchLineLocally(lineId, { qty: patch.qty });
-      }
       try {
         const id = ensureBillId();
         const bill = await updateLine({ billId: id, lineId, body: patch }).unwrap();
@@ -1078,35 +1060,9 @@ export function BillingScreen() {
         setStockHintLineId(null);
         if (patch.qty !== undefined) {
           setLineQtyDraft(patch.qty);
-          const updated = bill.items.find((i) => i.id === lineId);
-          if (updated) {
-            const short =
-              updated.shortageQty != null && updated.shortageQty > 0.001
-                ? updated.shortageQty
-                : calcShortageForAttemptedQty(patch.qty, {
-                    qty: updated.qty,
-                    availableQty: updated.availableQty,
-                    stockQty: updated.stockQty,
-                    pendingQty: updated.pendingQty,
-                    reservedQty: updated.reservedQty,
-                    shortageQty: updated.shortageQty,
-                  });
-            if (short > 0.001) {
-              setLineShortageHints((prev) => ({
-                ...prev,
-                [lineId]: { short, attemptedQty: patch.qty! },
-              }));
-            } else {
-              setLineShortageHints((prev) => {
-                if (!prev[lineId]) return prev;
-                const next = { ...prev };
-                delete next[lineId];
-                return next;
-              });
-            }
-          }
         }
         syncFromBill(bill);
+        syncBatchShortageAlertsFromBill(dispatch, bill);
         void refetchTabs();
       } catch (e) {
         if (reqId !== lineQtyApplyRef.current) return;
@@ -1115,18 +1071,6 @@ export function BillingScreen() {
         if (isInsufficientStockError(msg) && patch.qty != null) {
           setLineQtyDraft(patch.qty);
           setStockHintLineId(lineId);
-          const line = items.find((i) => i.id === lineId);
-          const avail = line ? parseInsufficientStockAvailable(msg) : null;
-          const short =
-            avail != null && line
-              ? Math.max(0, round2(patch.qty - line.qty - avail))
-              : calcShortageForAttemptedQty(patch.qty, line ?? { qty: patch.qty });
-          if (short > 0.001) {
-            setLineShortageHints((prev) => ({
-              ...prev,
-              [lineId]: { short, attemptedQty: patch.qty! },
-            }));
-          }
           try {
             const id = ensureBillId();
             await publishShortageAlert({
@@ -1142,10 +1086,6 @@ export function BillingScreen() {
           );
           return;
         }
-        if (patch.qty !== undefined) {
-          const prior = items.find((i) => i.id === lineId);
-          if (prior) patchLineLocally(lineId, { qty: prior.qty });
-        }
         setStockHintLineId(null);
         setError(msg);
       }
@@ -1156,29 +1096,23 @@ export function BillingScreen() {
       ensureBillId,
       updateLine,
       publishShortageAlert,
-      patchLineLocally,
       syncFromBill,
       refetchTabs,
       dismissIfBillClosed,
       setError,
-      items,
+      dispatch,
     ],
-  );
-
-  const commitLineQty = useCallback(
-    async (qty: number) => {
-      if (!selectedLineId || !isEditable) return;
-      await applyLineUpdate({ qty });
-    },
-    [selectedLineId, isEditable, applyLineUpdate],
   );
 
   const finishLineEdit = useCallback(async () => {
     if (lineQtyDraft != null && selectedLineId) {
-      await applyLineUpdate({ qty: lineQtyDraft });
+      const line = items.find((i) => i.id === selectedLineId);
+      if (line && Math.abs(line.qty - lineQtyDraft) > 0.001) {
+        await applyLineUpdate({ qty: lineQtyDraft });
+      }
     }
     deselectLine();
-  }, [lineQtyDraft, selectedLineId, applyLineUpdate, deselectLine]);
+  }, [lineQtyDraft, selectedLineId, items, applyLineUpdate, deselectLine]);
 
   const closeModals = useCallback(() => {
     setProductModalOpen(false);
@@ -1310,18 +1244,6 @@ export function BillingScreen() {
             </div>
           )}
 
-          {foreignBatchShortages.map((alert) => (
-            <div
-              key={alert.batchId}
-              className="billing-pos__toast billing-pos__toast--error"
-              role="alert"
-            >
-              <i className="fas fa-triangle-exclamation mr-2" aria-hidden />
-              <strong>{alert.counterName ?? 'Another counter'}</strong>: short{" "}
-              {alert.shortageQty} on this batch - your line may not be fulfillable
-            </div>
-          ))}
-
           <div className="billing-pos__body">
         <div className="billing-pos__col billing-pos__col--scan">
           <div className="billing-panel billing-panel--compact">
@@ -1422,20 +1344,27 @@ export function BillingScreen() {
                         item.batchId,
                         { billId, lineId: item.id },
                       );
+                      const live = item.batchId ? batchStocks[item.batchId] : undefined;
+                      const stockRow = {
+                        ...item,
+                        availableQty: live?.availableQty ?? item.availableQty,
+                        stockQty: live?.stockQty ?? item.stockQty,
+                        pendingQty: live?.pendingQty ?? item.pendingQty,
+                      };
+                      const pool = calcPoolAvailable(stockRow) ?? 0;
+                      const rowShort =
+                        pool <= 0.001 &&
+                        lineItemHasShortage(stockRow, batchAlert, {
+                          billId,
+                          lineId: item.id,
+                          batchId: item.batchId,
+                        }, batchShortageAlerts);
                       return (
                       <tr
                         key={item.id}
                         className={[
                           item.id === selectedLineId ? 'billing-line--selected' : '',
-                          lineItemHasShortage(
-                            item,
-                            lineShortageHints,
-                            batchAlert,
-                            { billId, lineId: item.id, batchId: item.batchId },
-                            batchShortageAlerts,
-                          )
-                            ? 'billing-line--shortage'
-                            : '',
+                          rowShort ? 'billing-line--shortage' : '',
                         ]
                           .filter(Boolean)
                           .join(' ') || undefined}
@@ -1451,17 +1380,7 @@ export function BillingScreen() {
                             <small className="d-block text-muted">{item.batchNumber}</small>
                           ) : null}
                         </td>
-                        <td className="text-right">
-                          {displayLineQty(item, {
-                            selectedLineId,
-                            lineQtyDraft,
-                            attemptedQty:
-                              lineShortageHints[item.id]?.attemptedQty ??
-                              (item.shortageQty != null && item.shortageQty > 0
-                                ? item.qty
-                                : undefined),
-                          })}
-                        </td>
+                        <td className="text-right">{item.qty}</td>
                         <td>
                           <LineStockIndicators
                             billId={billId}
@@ -1469,22 +1388,14 @@ export function BillingScreen() {
                             batchId={item.batchId}
                             batchNumber={item.batchNumber}
                             productName={item.productName}
-                            lineQty={displayLineQty(item, {
-                              selectedLineId,
-                              lineQtyDraft,
-                              attemptedQty: lineShortageHints[item.id]?.attemptedQty,
-                            })}
+                            lineQty={item.qty}
                             availableQty={item.availableQty}
                             pendingQty={item.pendingQty}
                             stockQty={item.stockQty}
                             reservedQty={item.reservedQty}
+                            shortageQty={item.shortageQty}
                             forceDetails={item.id === stockHintLineId}
-                            shortageOverride={
-                              lineShortageHints[item.id]?.short ?? batchAlert?.shortageQty
-                            }
-                            attemptedQty={
-                              lineShortageHints[item.id]?.attemptedQty ?? batchAlert?.attemptedQty
-                            }
+                            attemptedQty={batchAlert?.attemptedQty}
                             batchShortageAlert={batchAlert}
                           />
                         </td>
@@ -1523,8 +1434,8 @@ export function BillingScreen() {
                 }}
               >
                 <small className="text-muted d-block mb-1">
-                  Line {items.findIndex((i) => i.id === selectedLineId) + 1} | ^v line | Tab next | Enter
-                  done | Esc
+                  Line {items.findIndex((i) => i.id === selectedLineId) + 1} | ^v line | Tab discount |{' '}
+                  <strong>Done</strong> saves qty | Esc cancel
                 </small>
                 <div className="billing-line-edit__row">
                   <label className="small mb-0" htmlFor="line-qty">
@@ -1535,19 +1446,10 @@ export function BillingScreen() {
                     inputRef={lineQtyRef}
                     className="form-control form-control-sm"
                     value={lineQtyDraft ?? selectedLine.qty}
-                    onChange={(qty) => {
-                      setLineQtyDraft(qty);
-                      if (selectedLineId) {
-                        applyQtyShortageHint(selectedLineId, selectedLine, qty);
-                      }
-                    }}
-                    onAfterBlur={(qty) => {
-                      void commitLineQty(qty);
-                    }}
+                    onChange={(qty) => setLineQtyDraft(qty)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
-                        e.currentTarget.blur();
                         lineDiscRef.current?.focus();
                         lineDiscRef.current?.select();
                       }
@@ -1599,12 +1501,12 @@ export function BillingScreen() {
                     Done
                   </button>
                 </div>
-                {selectedLineId && lineShortageHints[selectedLineId]?.short > 0 && (
+                {draftShortagePreview && (
                   <p className="billing-line-edit__short-warn small mb-0 mt-2" role="alert">
                     <i className="fas fa-triangle-exclamation mr-1" aria-hidden />
-                    Need {lineShortageHints[selectedLineId].attemptedQty} - short by{' '}
-                    <strong>{lineShortageHints[selectedLineId].short}</strong>. Press Tab or{' '}
-                    <strong>Done</strong> to save qty and alert all counters
+                    Need {draftShortagePreview.attemptedQty} - short by{' '}
+                    <strong>{draftShortagePreview.short}</strong>. Press <strong>Done</strong> to save
+                    qty and alert all counters
                     {wsConnected ? '' : ' (Live off - check Redis & API)'}.
                   </p>
                 )}
@@ -1648,7 +1550,7 @@ export function BillingScreen() {
                 {paymentTotals.lineDiscountTotal > 0 && (
                   <div className="d-flex justify-content-between small text-success">
                     <span>Line disc.</span>
-                    <span>âˆ’ ₹ {paymentTotals.lineDiscountTotal.toFixed(2)}</span>
+                    <span>- ₹ {paymentTotals.lineDiscountTotal.toFixed(2)}</span>
                   </div>
                 )}
                 <div className="d-flex justify-content-between small">

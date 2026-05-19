@@ -134,7 +134,7 @@ export function DiscountField({
         </button>
       </div>
       <div className="disc-field__meta">
-        <span className="disc-field__preview">− ₹ {preview.toFixed(2)}</span>
+        <span className="disc-field__preview">- ₹ {preview.toFixed(2)}</span>
         {gross > 0 && <span className="disc-field__gross text-muted">of ₹ {gross.toFixed(2)}</span>}
       </div>
       {hint && <span className="disc-field__hint">{hint}</span>}

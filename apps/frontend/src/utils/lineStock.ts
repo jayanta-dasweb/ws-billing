@@ -1,5 +1,6 @@
 import { round2 } from '@billing/shared';
 import type { BatchShortageAlert } from '@/redux/slices/stockSlice';
+import { listShortagesForBatch } from '@/utils/batchShortageAlerts';
 
 export interface LineStockInputs {
   qty: number;
@@ -33,6 +34,10 @@ export function calcLineSellable(inputs: LineStockInputs): number | null {
 }
 
 export function calcLineShortage(inputs: LineStockInputs): number {
+  const pool = calcPoolAvailable(inputs);
+  if (pool != null && pool > 0.001) {
+    return 0;
+  }
   if (inputs.shortageQty != null && inputs.shortageQty > 0) {
     return round2(inputs.shortageQty);
   }
@@ -42,6 +47,20 @@ export function calcLineShortage(inputs: LineStockInputs): number {
   const sellable = calcLineSellable(inputs);
   if (sellable == null) return 0;
   return Math.max(0, round2(inputs.qty - sellable));
+}
+
+/**
+ * Shortage preview while editing qty (before Done).
+ * On save the server releases the current line qty then reserves the new qty,
+ * so this line can use pool + current qty without shorting.
+ */
+export function calcDraftQtyShortage(attemptedQty: number, line: LineStockInputs): number {
+  const pool = calcPoolAvailable(line);
+  if (pool == null) return 0;
+  if (pool > 0.001) return 0;
+  const currentQty = line.qty ?? 0;
+  const maxWithoutShort = round2(pool + currentQty);
+  return Math.max(0, round2(attemptedQty - maxWithoutShort));
 }
 
 /** Shortage if user tried a qty above what the line can sell (e.g. API rejected increase). */
@@ -57,14 +76,34 @@ export function calcShortageForAttemptedQty(
   return Math.max(0, round2(attemptedQty - sellable));
 }
 
-/** Whether a WS shortage alert should show on this line (same batch — any counter). */
+/** Any active shortage on this batch that should highlight the row (own line or other counter). */
+export function batchHasShortageForRow(
+  alerts: Record<string, BatchShortageAlert>,
+  ctx: { batchId?: string; billId?: string | null; lineId?: string },
+): boolean {
+  if (!ctx.batchId) return false;
+  return listShortagesForBatch(alerts, ctx.batchId).some((a) =>
+    batchShortageAppliesToLine(a, ctx),
+  );
+}
+
+/** Whether a WS shortage alert applies to this grid row. */
 export function batchShortageAppliesToLine(
   alert: BatchShortageAlert | null | undefined,
   ctx: { batchId?: string; billId?: string | null; lineId?: string },
 ): boolean {
   if (!alert || alert.shortageQty <= 0.001) return false;
   if (!ctx.batchId || alert.batchId !== ctx.batchId) return false;
-  return true;
+  if (alert.billId && alert.lineId) {
+    if (ctx.billId && ctx.lineId && alert.billId === ctx.billId && alert.lineId === ctx.lineId) {
+      return true;
+    }
+    if (ctx.billId && alert.billId !== ctx.billId) {
+      return true;
+    }
+    return false;
+  }
+  return false;
 }
 
 /** Qty to show in the items grid (typed draft, server line qty, or attempted when short). */

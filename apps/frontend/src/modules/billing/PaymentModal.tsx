@@ -177,7 +177,7 @@ export function PaymentModal({
     setChequeAudit({});
     setDdAudit({});
     setCreditAudit({});
-    // Only when modal opens — do not reset tab on every totals tick (was forcing UPI on Enter).
+    // Only when modal opens - do not reset tab on every totals tick (was forcing UPI on Enter).
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset once per open
   }, [open, setError, setPayTab]);
 
@@ -266,7 +266,7 @@ export function PaymentModal({
         if (Math.abs(splitSum - payable) > 0.01) {
           setError(
             splitRemaining > 0
-              ? `₹${splitRemaining.toFixed(2)} still due — adjust split amounts`
+              ? `₹${splitRemaining.toFixed(2)} still due - adjust split amounts`
               : `Split total exceeds due by ₹${Math.abs(splitRemaining).toFixed(2)}`,
           );
           return;
@@ -299,17 +299,15 @@ export function PaymentModal({
       }
 
       const audit =
-        payMode === PaymentMode.CASH
-          ? cashAudit
-          : payMode === PaymentMode.CARD
-            ? cardAudit
-            : payMode === PaymentMode.UPI
-              ? upiAudit
-              : payMode === PaymentMode.CHEQUE
-                ? chequeAudit
-                : payMode === PaymentMode.DD
-                  ? ddAudit
-                  : creditAudit;
+        payMode === PaymentMode.CARD
+          ? cardAudit
+          : payMode === PaymentMode.UPI
+            ? upiAudit
+            : payMode === PaymentMode.CHEQUE
+              ? chequeAudit
+              : payMode === PaymentMode.DD
+                ? ddAudit
+                : creditAudit;
 
       if (!assertAudit(payMode, audit, 'Payment')) return;
 
@@ -556,7 +554,7 @@ export function PaymentModal({
             {totals.lineDiscountTotal > 0 && (
               <div className="billing-pay-row billing-pay-row--disc">
                 <span>Line discounts</span>
-                <span>− ₹ {totals.lineDiscountTotal.toFixed(2)}</span>
+                <span>- ₹ {totals.lineDiscountTotal.toFixed(2)}</span>
               </div>
             )}
             <div className="billing-pay-row">

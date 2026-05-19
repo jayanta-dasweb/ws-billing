@@ -9,8 +9,8 @@ const KIND_META: Record<
   { label: string; shortLabel: string; icon: string; chipClass: string }
 > = {
   available: {
-    label: 'Available',
-    shortLabel: 'Avail',
+    label: 'Free pool',
+    shortLabel: 'Pool',
     icon: 'fa-circle-check',
     chipClass: 'stk-metric--avail',
   },
@@ -47,7 +47,6 @@ export interface StockMetricProps {
 export function StockMetric({
   kind,
   value,
-  live,
   variant = 'light',
   size = 'sm',
   tone = 'default',
@@ -65,7 +64,6 @@ export function StockMetric({
         `stk-metric--${variant}`,
         `stk-metric--${size}`,
         tone !== 'default' ? `stk-metric--tone-${tone}` : '',
-        live ? 'stk-metric--live' : '',
         className,
       ]
         .filter(Boolean)
@@ -80,12 +78,6 @@ export function StockMetric({
         <span className="stk-metric__label">{caption}</span>
         <span className="stk-metric__value">{display}</span>
       </span>
-      {live && (
-        <span className="stk-metric__live" title="Live sync">
-          <span className="stk-metric__live-dot" aria-hidden />
-          LIVE
-        </span>
-      )}
     </span>
   );
 }
