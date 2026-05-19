@@ -1,4 +1,5 @@
 import { round2 } from '@billing/shared';
+import type { BatchShortageAlert } from '@/redux/slices/stockSlice';
 
 export interface LineStockInputs {
   qty: number;
@@ -47,6 +48,23 @@ export function calcShortageForAttemptedQty(
   const sellable = calcLineSellable(line);
   if (sellable == null) return 0;
   return Math.max(0, round2(attemptedQty - sellable));
+}
+
+/** Whether a WS shortage alert should show on this bill line (incl. other counters, same batch). */
+export function batchShortageAppliesToLine(
+  alert: BatchShortageAlert | null | undefined,
+  ctx: { batchId?: string; billId?: string | null; lineId?: string },
+): boolean {
+  if (!alert || alert.shortageQty <= 0.001) return false;
+  if (ctx.batchId && alert.batchId !== ctx.batchId) return false;
+  if (alert.billId && ctx.billId && alert.billId === ctx.billId) {
+    if (alert.lineId && ctx.lineId) return alert.lineId === ctx.lineId;
+    return true;
+  }
+  if (alert.billId && ctx.billId && alert.billId !== ctx.billId) {
+    return Boolean(ctx.batchId && alert.batchId === ctx.batchId);
+  }
+  return true;
 }
 
 /** Qty to show in the items grid (typed draft, server line qty, or attempted when short). */

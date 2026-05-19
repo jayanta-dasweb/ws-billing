@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useLiveBatchStock } from '@/hooks/useLiveBatchStock';
 import type { BatchShortageAlert } from '@/redux/slices/stockSlice';
-import { calcLineShortage } from '@/utils/lineStock';
+import { batchShortageAppliesToLine, calcLineShortage } from '@/utils/lineStock';
 import { StockMetricsInline } from './StockMetrics';
 import { BatchStockHoldModal } from './BatchStockHoldModal';
 
@@ -55,12 +55,11 @@ export function LineStockIndicators({
     pendingQty: live.pendingQty ?? pendingQty,
   };
   const computedShort = calcLineShortage(stockInputs);
-  const batchAlertApplies =
-    batchShortageAlert &&
-    batchShortageAlert.shortageQty > 0.001 &&
-    (!batchShortageAlert.lineId ||
-      batchShortageAlert.lineId === lineId ||
-      (billId != null && batchShortageAlert.billId === billId));
+  const batchAlertApplies = batchShortageAppliesToLine(batchShortageAlert, {
+    batchId,
+    billId,
+    lineId,
+  });
   const wsShort = batchAlertApplies ? batchShortageAlert!.shortageQty : 0;
   const shortage =
     shortageOverride != null && shortageOverride > 0
@@ -143,14 +142,13 @@ export function lineItemHasShortage(
   },
   shortageHints?: Record<string, { short: number }>,
   batchAlert?: BatchShortageAlert | null,
-  scope?: { billId?: string | null; lineId?: string },
+  scope?: { billId?: string | null; lineId?: string; batchId?: string },
 ): boolean {
-  const alertApplies =
-    batchAlert &&
-    batchAlert.shortageQty > 0.001 &&
-    (!batchAlert.lineId ||
-      batchAlert.lineId === scope?.lineId ||
-      (scope?.billId != null && batchAlert.billId === scope.billId));
+  const alertApplies = batchShortageAppliesToLine(batchAlert, {
+    batchId: scope?.batchId,
+    billId: scope?.billId,
+    lineId: scope?.lineId,
+  });
   if (alertApplies) return true;
   if (item.id && shortageHints?.[item.id]?.short != null && shortageHints[item.id].short > 0) {
     return true;
