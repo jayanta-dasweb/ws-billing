@@ -1106,31 +1106,7 @@ export function BillingScreen() {
       dismissIfBillClosed,
       setError,
       items,
-      publishShortageAlert,
     ],
-  );
-
-  const broadcastShortage = useCallback(
-    async (lineId: string, attemptedQty: number) => {
-      const line = items.find((i) => i.id === lineId);
-      if (!line?.batchId) return 0;
-      const short = calcShortageForAttemptedQty(attemptedQty, {
-        qty: line.qty,
-        availableQty: line.availableQty,
-        stockQty: line.stockQty,
-        pendingQty: line.pendingQty,
-      });
-      applyQtyShortageHint(lineId, line, attemptedQty);
-      if (short <= 0.001) return 0;
-      try {
-        const id = ensureBillId();
-        await publishShortageAlert({ billId: id, lineId, attemptedQty }).unwrap();
-      } catch (e) {
-        setError(getApiErrorMessage(e, 'Could not broadcast shortage alert'));
-      }
-      return short;
-    },
-    [items, applyQtyShortageHint, ensureBillId, publishShortageAlert, setError],
   );
 
   const commitLineQty = useCallback(
