@@ -5,7 +5,12 @@ import { useDispatch, useSelector } from 'react-redux';
 import { PageSpinner } from '@/components/loading/PageSpinner';
 import { setBootstrapped, setCredentials, setCustomerCredentials } from '@/redux/slices/authSlice';
 import type { RootState } from '@/redux/store';
-import { getCsrfToken, getCustomerCsrfToken } from '@/utils/csrf';
+import {
+  getCsrfToken,
+  getCustomerCsrfToken,
+  hasCustomerSessionCookie,
+  hasStaffSessionCookie,
+} from '@/utils/csrf';
 import { unwrapApi } from '@/utils/api';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import { mapAuthUserDto, type AuthUserDto } from '@/services/api/authApi';
@@ -53,34 +58,62 @@ export function AuthBootstrap({ children }: { children: React.ReactNode }) {
       }
     }
 
+    async function restoreCustomerSession(): Promise<boolean> {
+      const customerRes = await refreshSession(
+        '/customer-auth/refresh',
+        getCustomerCsrfToken(),
+      );
+      if (cancelled || !customerRes.ok) return false;
+      const data = unwrapApi<{ accessToken: string; customer: CustomerProfile }>(
+        await customerRes.json(),
+      );
+      dispatch(
+        setCustomerCredentials({
+          accessToken: data.accessToken,
+          customer: data.customer,
+        }),
+      );
+      return true;
+    }
+
+    async function restoreStaffSession(): Promise<boolean> {
+      const staffRes = await refreshSession('/auth/refresh', getCsrfToken());
+      if (cancelled || !staffRes.ok) return false;
+      const data = unwrapApi<{ accessToken: string; user: AuthUserDto }>(await staffRes.json());
+      dispatch(
+        setCredentials({
+          accessToken: data.accessToken,
+          user: mapAuthUserDto(data.user),
+        }),
+      );
+      return true;
+    }
+
     async function restoreSession() {
       try {
-        // Refresh token is HttpOnly — always call API with credentials (do not gate on document.cookie).
-        const staffRes = await refreshSession('/auth/refresh', getCsrfToken());
-        if (cancelled) return;
-        if (staffRes.ok) {
-          const data = unwrapApi<{ accessToken: string; user: AuthUserDto }>(await staffRes.json());
-          dispatch(
-            setCredentials({
-              accessToken: data.accessToken,
-              user: mapAuthUserDto(data.user),
-            }),
-          );
+        const onCustomerRoute =
+          typeof window !== 'undefined' && window.location.pathname.startsWith('/customer');
+        const hasCustomer = hasCustomerSessionCookie();
+        const hasStaff = hasStaffSessionCookie();
+
+        // Customer portal: never hit staff /auth/refresh (only customer_refresh_token exists).
+        if (onCustomerRoute) {
+          if (hasCustomer) {
+            await restoreCustomerSession();
+          }
           return;
         }
 
-        const customerRes = await refreshSession('/customer-auth/refresh', getCustomerCsrfToken());
-        if (cancelled) return;
-        if (customerRes.ok) {
-          const data = unwrapApi<{ accessToken: string; customer: CustomerProfile }>(
-            await customerRes.json(),
-          );
-          dispatch(
-            setCustomerCredentials({
-              accessToken: data.accessToken,
-              customer: data.customer,
-            }),
-          );
+        if (!hasCustomer && !hasStaff) {
+          return;
+        }
+
+        if (hasStaff && (await restoreStaffSession())) {
+          return;
+        }
+
+        if (hasCustomer) {
+          await restoreCustomerSession();
         }
       } catch {
         /* expired session, backend down, timeout, or aborted */
