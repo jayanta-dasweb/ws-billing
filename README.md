@@ -12,6 +12,21 @@ Real-time retail / pharmacy billing: multi-counter POS, stock reservations (Redi
 | **Monorepo** | npm workspaces (`apps/backend`, `apps/frontend`, `packages/shared`) |
 | **Deploy** | Docker Compose (MySQL, Redis, optional full stack + Nginx) |
 
+## System architecture
+
+High-level context: staff and customers use the Next.js app; the NestJS API handles REST, WebSocket, and background jobs; MySQL stores data; Redis handles pending stock and the commit queue.
+
+![System architecture](assets/system-architecture.png)
+
+| Layer | Components |
+|-------|------------|
+| **Users** | Cashier, Admin, Customer |
+| **Frontend :3000** | Billing POS (REST + realtime), Admin/Masters, Customer portal |
+| **Backend :4000** | REST API + Swagger, Socket.IO, BullMQ worker |
+| **Data** | MySQL (bills, stock, masters), Redis (pending qty, queue) |
+
+**Core flow:** typing updates Redis `pending_qty` only → bill complete enqueues BullMQ → worker commits stock in MySQL with row locks → WebSocket notifies all counters.
+
 ## Prerequisites
 
 - **Node.js 20+** and npm
@@ -151,89 +166,89 @@ npm run prisma:seed -w @billing/backend   # Demo users & masters
 
 ---
 
-## Project layout
+## Project structure
 
 ```
-├── ./ws-billing/                          # Monorepo root (npm workspaces)
-├── ./├── .env.example                     # Env template → copy to .env
-├── ./├── .gitignore
-├── ./├── package.json                     # Root scripts: dev, build, docker, prisma
-├── ./├── package-lock.json
-├── ./├── docker-compose.yml               # MySQL, Redis, backend, frontend, nginx
-├── ./├── ecosystem.config.js              # PM2 (production)
-├── ./├── README.md
-├── ./│
-├── ./├── apps/
-├── ./│   ├── backend/                     # NestJS API (:4000)
-├── ./│   │   ├── Dockerfile
-├── ./│   │   ├── package.json
-├── ./│   │   ├── prisma/
-├── ./│   │   │   ├── schema.prisma        # DB models
-├── ./│   │   │   ├── seed.ts              # Demo users & masters
-├── ./│   │   │   └── migrations/          # SQL migrations (versioned)
-├── ./│   │   ├── scripts/                 # kill-port, smoke tests, clean
-├── ./│   │   └── src/
-├── ./│   │       ├── main.ts
-├── ./│   │       ├── app.module.ts
-├── ./│   │       ├── auth/                # Staff JWT login, refresh, guards
-├── ./│   │       ├── billing/             # POS bills, lines, commit, payments
-├── ./│   │       ├── customer-auth/       # Customer portal login, OTP reset
-├── ./│   │       ├── common/              # Audit, filters, decorators, logger
-├── ./│   │       ├── health/
-├── ./│   │       ├── inventory/           # Stock adjustments, movements
-├── ./│   │       ├── invoice/             # GST invoice JSON + PDF
-├── ./│   │       ├── masters/             # CRUD: product, batch, customer, user…
-├── ./│   │       ├── prisma/              # PrismaService module
-├── ./│   │       ├── queue/               # BullMQ bill commit processor
-├── ./│   │       ├── redis/               # Pending qty / reservations
-├── ./│   │       ├── reports/
-├── ./│   │       ├── returns/             # Sales returns
-├── ./│   │       ├── security/            # RBAC, permissions, IP allowlist
-├── ./│   │       ├── stock/               # Reservations, shortage alerts
-├── ./│   │       └── websocket/           # Socket.IO billing events
-├── ./│   │
-├── ./│   └── frontend/                    # Next.js 15 UI (:3000)
-├── ./│       ├── Dockerfile
-├── ./│       ├── package.json
-├── ./│       ├── next.config.ts
-├── ./│       ├── public/                  # Icons, PWA, service worker
-├── ./│       └── src/
-├── ./│           ├── app/                 # App Router pages
-├── ./│           │   ├── page.tsx         # Home (staff vs customer)
-├── ./│           │   ├── login/           # Staff sign-in
-├── ./│           │   ├── billing/         # Cashier POS
-├── ./│           │   ├── (admin)/         # Admin layout group
-├── ./│           │   │   ├── dashboard/
-├── ./│           │   │   ├── masters/     # Products, users, roles…
-├── ./│           │   │   └── inventory/   # Stock, returns, audit
-├── ./│           │   └── customer/        # Customer portal
-├── ./│           │       ├── login/
-├── ./│           │       ├── dashboard/   # Purchase analytics
-├── ./│           │       ├── invoices/    # List + [billId] detail
-├── ./│           │       └── forgot-password/
-├── ./│           ├── components/          # Reusable UI (auth, billing, customer…)
-├── ./│           ├── config/              # adminNav.ts
-├── ./│           ├── hooks/
-├── ./│           ├── layouts/               # AdminLayout, BillingLayout
-├── ./│           ├── lib/                 # apiBase, offline draft, customer PDF
-├── ./│           ├── modules/             # Large screens (BillingScreen, modals)
-├── ./│           ├── redux/               # store, auth, stock, RTK Query
-├── ./│           ├── services/api/        # RTK endpoints per domain
-├── ./│           ├── stores/              # Zustand billing UI state
-├── ./│           ├── styles/              # customer-portal.css
-├── ./│           ├── utils/               # permissions, roles, helpers
-├── ./│           └── websocket/           # useBillingSocket
-├── ./│
-├── ./├── packages/
-├── ./│   └── shared/                      # Shared TypeScript types/DTOs
-├── ./│       └── src/                     # bill, invoice-api, permissions, audit…
-├── ./│
-├── ./├── docker/
-├── ./│   └── mysql/                       # Init SQL grants
-├── ./├── nginx/
-├── ./│   └── nginx.conf                   # Reverse proxy (Docker full stack)
-└── ./└── docs/
-    └── ./└── docs/└── ARCHITECTURE.md              # Design notes
+ws-billing/                          # Monorepo root (npm workspaces)
+├── .env.example                     # Env template → copy to .env
+├── .gitignore
+├── package.json                     # Root scripts: dev, build, docker, prisma
+├── package-lock.json
+├── docker-compose.yml               # MySQL, Redis, backend, frontend, nginx
+├── ecosystem.config.js              # PM2 (production)
+├── README.md
+├── assets/
+│   └── system-architecture.png      # Architecture diagram (README)
+│
+├── apps/
+│   ├── backend/                     # NestJS API (:4000)
+│   │   ├── Dockerfile
+│   │   ├── package.json
+│   │   ├── prisma/
+│   │   │   ├── schema.prisma        # DB models
+│   │   │   ├── seed.ts              # Demo users & masters
+│   │   │   └── migrations/          # SQL migrations (versioned)
+│   │   ├── scripts/                 # kill-port, smoke tests, clean
+│   │   └── src/
+│   │       ├── main.ts
+│   │       ├── app.module.ts
+│   │       ├── auth/                # Staff JWT login, refresh, guards
+│   │       ├── billing/             # POS bills, lines, commit, payments
+│   │       ├── customer-auth/       # Customer portal login, OTP reset
+│   │       ├── common/              # Audit, filters, decorators, logger
+│   │       ├── health/
+│   │       ├── inventory/           # Stock adjustments, movements
+│   │       ├── invoice/             # GST invoice JSON + PDF
+│   │       ├── masters/             # CRUD: product, batch, customer, user…
+│   │       ├── prisma/              # PrismaService module
+│   │       ├── queue/               # BullMQ bill commit processor
+│   │       ├── redis/               # Pending qty / reservations
+│   │       ├── reports/
+│   │       ├── returns/             # Sales returns
+│   │       ├── security/            # RBAC, permissions, IP allowlist
+│   │       ├── stock/               # Reservations, shortage alerts
+│   │       └── websocket/           # Socket.IO billing events
+│   │
+│   └── frontend/                    # Next.js 15 UI (:3000)
+│       ├── Dockerfile
+│       ├── package.json
+│       ├── next.config.ts
+│       ├── public/                  # Icons, PWA, service worker
+│       └── src/
+│           ├── app/                 # App Router pages
+│           │   ├── page.tsx         # Home (staff vs customer)
+│           │   ├── login/           # Staff sign-in
+│           │   ├── billing/         # Cashier POS
+│           │   ├── (admin)/         # Admin layout group
+│           │   │   ├── dashboard/
+│           │   │   ├── masters/     # Products, users, roles…
+│           │   │   └── inventory/   # Stock, returns, audit
+│           │   └── customer/        # Customer portal
+│           │       ├── login/
+│           │       ├── dashboard/   # Purchase analytics
+│           │       ├── invoices/    # List + [billId] detail
+│           │       └── forgot-password/
+│           ├── components/          # Reusable UI (auth, billing, customer…)
+│           ├── config/              # adminNav.ts
+│           ├── hooks/
+│           ├── layouts/             # AdminLayout, BillingLayout
+│           ├── lib/                 # apiBase, offline draft, customer PDF
+│           ├── modules/             # Large screens (BillingScreen, modals)
+│           ├── redux/               # store, auth, stock, RTK Query
+│           ├── services/api/        # RTK endpoints per domain
+│           ├── stores/              # Zustand billing UI state
+│           ├── styles/              # customer-portal.css
+│           ├── utils/               # permissions, roles, helpers
+│           └── websocket/           # useBillingSocket
+│
+├── packages/
+│   └── shared/                      # Shared TypeScript types/DTOs
+│       └── src/                     # bill, invoice-api, permissions, audit…
+│
+├── docker/
+│   └── mysql/                       # Init SQL grants
+└── nginx/
+    └── nginx.conf                   # Reverse proxy (Docker full stack)
 ```
 ---
 
