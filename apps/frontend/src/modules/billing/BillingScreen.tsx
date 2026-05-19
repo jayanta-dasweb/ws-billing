@@ -1554,35 +1554,59 @@ export function BillingScreen() {
             <div className="billing-panel__head">Payment (F5)</div>
             <div className="billing-panel__body">
               <div className="billing-totals">
-                <div className="d-flex justify-content-between small">
-                  <span>Subtotal</span>
-                  <span>₹ {subtotal.toFixed(2)}</span>
-                </div>
-                {lineDiscountTotal > 0 && (
-                  <div className="d-flex justify-content-between small text-success">
-                    <span>Line disc.</span>
-                    <span>− ₹ {lineDiscountTotal.toFixed(2)}</span>
-                  </div>
-                )}
-                {billDiscount > 0 && (
-                  <div className="d-flex justify-content-between small text-success">
-                    <span>Bill disc.</span>
-                    <span>− ₹ {billDiscount.toFixed(2)}</span>
-                  </div>
-                )}
-                {roundOff !== 0 && (
-                  <div className="d-flex justify-content-between small text-warning">
-                    <span>Round off</span>
+                {paymentTotals.lineDiscountTotal > 0.005 && (
+                  <div className="d-flex justify-content-between small text-muted">
+                    <span>Gross</span>
                     <span>
-                      {roundOff >= 0 ? '+' : ''}
-                      {roundOff.toFixed(2)}
+                      ₹ {(paymentTotals.subtotal + paymentTotals.lineDiscountTotal).toFixed(2)}
                     </span>
                   </div>
                 )}
-                <div className="d-flex justify-content-between small text-muted">
-                  <span>Exact</span>
-                  <span>₹ {effectiveExactDue.toFixed(2)}</span>
+                {paymentTotals.lineDiscountTotal > 0 && (
+                  <div className="d-flex justify-content-between small text-success">
+                    <span>Line disc.</span>
+                    <span>− ₹ {paymentTotals.lineDiscountTotal.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="d-flex justify-content-between small">
+                  <span>{paymentTotals.lineDiscountTotal > 0.005 ? 'Taxable' : 'Subtotal'}</span>
+                  <span>₹ {paymentTotals.subtotal.toFixed(2)}</span>
                 </div>
+                {(paymentTotals.cgstTotal + paymentTotals.sgstTotal + paymentTotals.igstTotal) >
+                  0.005 && (
+                  <div className="d-flex justify-content-between small">
+                    <span>GST</span>
+                    <span>
+                      + ₹{' '}
+                      {(
+                        paymentTotals.cgstTotal +
+                        paymentTotals.sgstTotal +
+                        paymentTotals.igstTotal
+                      ).toFixed(2)}
+                    </span>
+                  </div>
+                )}
+                {paymentTotals.billDiscount > 0 && (
+                  <div className="d-flex justify-content-between small text-success">
+                    <span>Bill disc.</span>
+                    <span>− ₹ {paymentTotals.billDiscount.toFixed(2)}</span>
+                  </div>
+                )}
+                {paymentTotals.roundOff !== 0 && (
+                  <div className="d-flex justify-content-between small text-warning">
+                    <span>Round off</span>
+                    <span>
+                      {paymentTotals.roundOff >= 0 ? '+' : ''}
+                      {paymentTotals.roundOff.toFixed(2)}
+                    </span>
+                  </div>
+                )}
+                {Math.abs(roundOff) >= 0.005 && (
+                  <div className="d-flex justify-content-between small text-muted">
+                    <span>Exact (incl. GST)</span>
+                    <span>₹ {effectiveExactDue.toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="d-flex justify-content-between h5 font-weight-bold text-primary mt-1 mb-1">
                   <span>Due</span>
                   <span>₹ {effectiveGrandTotal.toFixed(2)}</span>

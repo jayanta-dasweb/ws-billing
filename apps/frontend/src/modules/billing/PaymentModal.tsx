@@ -547,24 +547,30 @@ export function PaymentModal({
         <details className="billing-pay-details">
           <summary>Bill breakdown & discount</summary>
           <div className="billing-pay-summary">
-            <div className="billing-pay-row">
-              <span>Subtotal</span>
-              <span>₹ {totals.subtotal.toFixed(2)}</span>
-            </div>
+            {totals.lineDiscountTotal > 0.005 && (
+              <div className="billing-pay-row text-muted">
+                <span>Gross</span>
+                <span>₹ {(totals.subtotal + totals.lineDiscountTotal).toFixed(2)}</span>
+              </div>
+            )}
             {totals.lineDiscountTotal > 0 && (
               <div className="billing-pay-row billing-pay-row--disc">
                 <span>Line discounts</span>
                 <span>− ₹ {totals.lineDiscountTotal.toFixed(2)}</span>
               </div>
             )}
+            <div className="billing-pay-row">
+              <span>{totals.lineDiscountTotal > 0.005 ? 'Taxable' : 'Subtotal'}</span>
+              <span>₹ {totals.subtotal.toFixed(2)}</span>
+            </div>
             {(totals.cgstTotal > 0 || totals.sgstTotal > 0) && (
               <div className="billing-pay-row">
                 <span>GST</span>
-                <span>₹ {(totals.cgstTotal + totals.sgstTotal + totals.igstTotal).toFixed(2)}</span>
+                <span>+ ₹ {(totals.cgstTotal + totals.sgstTotal + totals.igstTotal).toFixed(2)}</span>
               </div>
             )}
             <div className="billing-pay-row">
-              <span>Before bill discount</span>
+              <span>Total (incl. GST)</span>
               <span>₹ {totals.rawGrandTotal.toFixed(2)}</span>
             </div>
             <div className="billing-pay-disc">
