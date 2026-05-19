@@ -67,7 +67,13 @@ From **repo root**:
 npm install
 ```
 
-This installs the monorepo (`apps/backend`, `apps/frontend`, `packages/shared`).
+This installs the monorepo (`apps/backend`, `apps/frontend`, `packages/shared`) and **builds `packages/shared`** automatically (`postinstall`). That package is required before the backend can start.
+
+If you see **`Cannot find module '@billing/shared'`**, from **repo root** run:
+
+```bash
+npm run build:shared
+```
 
 ### Step 4 — Start MySQL and Redis
 
@@ -140,7 +146,7 @@ npx dotenv -e ../../.env -- prisma migrate reset --force
 
 ### Step 6 — Run the application
 
-From **repo root**:
+From **repo root** (do **not** run `npm run dev` only inside `apps/backend` on first setup):
 
 ```bash
 npm run dev
@@ -148,11 +154,14 @@ npm run dev
 
 This will:
 
-1. Build `packages/shared`
+1. Rebuild `packages/shared` (if needed)
 2. Start **backend** on http://localhost:4000
 3. Start **frontend** on http://localhost:3000
 
 Leave this terminal open. Open the URLs below in your browser.
+
+> **Wrong:** `cd apps/backend` → `npm run dev` before `packages/shared/dist` exists.  
+> **Right:** `npm run dev` from repo root, or `npm run build:shared` then backend dev.
 
 ### Step 7 — Verify (optional)
 
@@ -175,6 +184,7 @@ docker compose up -d mysql redis
 npm run prisma:generate
 npm run prisma:deploy
 npm run prisma:seed
+npm run build:shared
 npm run dev
 ```
 
@@ -249,6 +259,7 @@ npm run dev:frontend        # Frontend only
 npm run build               # Production build (shared + backend + frontend)
 npm run docker:up           # docker compose up -d
 npm run docker:down         # docker compose down
+npm run build:shared        # Build packages/shared (also runs on npm install)
 npm run prisma:generate     # Regenerate Prisma Client
 npm run prisma:deploy       # Apply migrations (production / fresh DB)
 npm run prisma:migrate      # Create migration (dev only, needs shadow DB)
@@ -349,7 +360,8 @@ ws-billing/                          # Monorepo root (npm workspaces)
 
 | Issue | Fix |
 |-------|-----|
-| **Wrong folder** | Run `npm install`, `prisma:*`, and `npm run dev` from **repo root** (`ws-billing/`), not inside `apps/frontend` only |
+| **Wrong folder** | Run `npm install`, `prisma:*`, and `npm run dev` from **repo root** (`ws-billing/`), not inside `apps/backend` or `apps/frontend` only |
+| **`Cannot find module '@billing/shared'`** | From repo root: `npm run build:shared` (or re-run `npm install` — builds shared on `postinstall`). Then `npm run dev` from **repo root** |
 | **`.env` not found** | `cp .env.example .env` at **repo root** (not inside `apps/backend`) |
 | **Port 3000 / 4000 in use** | Close other apps; `npm run dev` tries to free ports on Windows |
 | **DB connection refused** | `docker compose up -d mysql redis` → wait until `docker compose ps` shows mysql **healthy** |

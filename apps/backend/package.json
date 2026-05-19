@@ -5,7 +5,9 @@
   "scripts": {
     "build": "nest build",
     "clean": "node scripts/clean-dist.mjs",
+    "predev": "node scripts/ensure-shared-built.mjs",
     "dev": "node scripts/kill-port.mjs 4000 && nest start --watch",
+    "predev:fresh": "node scripts/ensure-shared-built.mjs",
     "dev:fresh": "node scripts/kill-port.mjs 4000 && node scripts/clean-dist.mjs && nest build && nest start --watch",
     "start": "node dist/main",
     "start:prod": "node dist/main",
