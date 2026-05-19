@@ -16,6 +16,8 @@ interface NumericInputProps {
   onKeyDown?: KeyboardEventHandler<HTMLInputElement>;
   /** Fires after blur normalization (final numeric value). */
   onAfterBlur?: (value: number) => void;
+  /** Keep user-typed text when parent `value` changes (e.g. stock rejected but qty stays visible). */
+  lockDisplay?: boolean;
 }
 
 function formatDisplay(n: number): string {
@@ -35,12 +37,14 @@ export function NumericInput({
   inputRef,
   onKeyDown,
   onAfterBlur,
+  lockDisplay = false,
 }: NumericInputProps) {
   const [text, setText] = useState(() => formatDisplay(value));
 
   useEffect(() => {
+    if (lockDisplay) return;
     setText(formatDisplay(value));
-  }, [value]);
+  }, [value, lockDisplay]);
 
   return (
     <input

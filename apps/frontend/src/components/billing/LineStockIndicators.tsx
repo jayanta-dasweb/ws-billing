@@ -22,6 +22,9 @@ interface LineStockIndicatorsProps {
   attemptedQty?: number;
   /** Cross-counter WS alert for this batch. */
   batchShortageAlert?: BatchShortageAlert | null;
+  /** Hide WS batch alert when this line/batch is not on the active bill. */
+  billId?: string | null;
+  lineId?: string;
 }
 
 /**
@@ -39,6 +42,8 @@ export function LineStockIndicators({
   shortageOverride,
   attemptedQty,
   batchShortageAlert,
+  billId,
+  lineId,
 }: LineStockIndicatorsProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const live = useLiveBatchStock(batchId, { availableQty, pendingQty, stockQty });
@@ -50,10 +55,13 @@ export function LineStockIndicators({
     pendingQty: live.pendingQty ?? pendingQty,
   };
   const computedShort = calcLineShortage(stockInputs);
-  const wsShort =
-    batchShortageAlert && batchShortageAlert.shortageQty > 0.001
-      ? batchShortageAlert.shortageQty
-      : 0;
+  const batchAlertApplies =
+    batchShortageAlert &&
+    batchShortageAlert.shortageQty > 0.001 &&
+    (!batchShortageAlert.lineId ||
+      batchShortageAlert.lineId === lineId ||
+      (billId != null && batchShortageAlert.billId === billId));
+  const wsShort = batchAlertApplies ? batchShortageAlert!.shortageQty : 0;
   const shortage =
     shortageOverride != null && shortageOverride > 0
       ? shortageOverride
@@ -61,7 +69,7 @@ export function LineStockIndicators({
         ? wsShort
         : computedShort;
   const hasShort = shortage > 0.001;
-  const triedQty = attemptedQty ?? batchShortageAlert?.attemptedQty;
+  const triedQty = attemptedQty ?? (batchAlertApplies ? batchShortageAlert?.attemptedQty : undefined);
   const sellable =
     live.stockQty != null && live.pendingQty != null
       ? live.stockQty - live.pendingQty + lineQty
@@ -93,7 +101,7 @@ export function LineStockIndicators({
               setModalOpen(true);
             }}
             title={
-              batchShortageAlert?.counterName
+              batchAlertApplies && batchShortageAlert?.counterName
                 ? `Shortage from ${batchShortageAlert.counterName} — view details`
                 : 'View shortage and counter reservations'
             }
@@ -114,7 +122,7 @@ export function LineStockIndicators({
           lineQty={lineQty}
           shortageQty={hasShort ? shortage : undefined}
           attemptedQty={triedQty}
-          alertCounterName={batchShortageAlert?.counterName}
+          alertCounterName={batchAlertApplies ? batchShortageAlert?.counterName : undefined}
           onClose={() => setModalOpen(false)}
         />
       )}
@@ -133,8 +141,15 @@ export function lineItemHasShortage(
   },
   shortageHints?: Record<string, { short: number }>,
   batchAlert?: BatchShortageAlert | null,
+  scope?: { billId?: string | null; lineId?: string },
 ): boolean {
-  if (batchAlert && batchAlert.shortageQty > 0.001) return true;
+  const alertApplies =
+    batchAlert &&
+    batchAlert.shortageQty > 0.001 &&
+    (!batchAlert.lineId ||
+      batchAlert.lineId === scope?.lineId ||
+      (scope?.billId != null && batchAlert.billId === scope.billId));
+  if (alertApplies) return true;
   if (item.id && shortageHints?.[item.id]?.short != null && shortageHints[item.id].short > 0) {
     return true;
   }

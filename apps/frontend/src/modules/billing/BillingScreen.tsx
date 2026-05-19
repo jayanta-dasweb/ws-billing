@@ -67,7 +67,7 @@ import { WsConnectionStrip } from '@/components/billing/WsConnectionStrip';
 import { BillingAlertsStrip } from '@/components/billing/OperationalGuidanceBar';
 import { BillingKeyboardHelp } from '@/components/billing/BillingKeyboardHelp';
 import { useBillReservationHeartbeat } from '@/hooks/useBillReservationHeartbeat';
-import { setBatchStocks } from '@/redux/slices/stockSlice';
+import { clearBatchShortageAlert, setBatchStocks } from '@/redux/slices/stockSlice';
 import { useOfflineBillingSync } from '@/hooks/useOfflineBillingSync';
 import { useTimedAlerts } from '@/hooks/useTimedAlerts';
 import { useLazyGetInvoiceByBillQuery } from '@/services/api/invoiceApi';
@@ -261,6 +261,7 @@ export function BillingScreen() {
           item,
           lineShortageHints,
           item.batchId ? batchShortageAlerts[item.batchId] : undefined,
+          { billId, lineId: item.id },
         ),
       ),
     [items, lineShortageHints, batchShortageAlerts],
@@ -849,19 +850,43 @@ export function BillingScreen() {
   const handleRemoveLine = useCallback(
     async (lineId: string) => {
       if (!isEditable) return;
+      const removed = items.find((i) => i.id === lineId);
+      const batchId = removed?.batchId;
       try {
         await runBusy(async () => {
           const id = ensureBillId();
           const bill = await removeLine({ billId: id, lineId }).unwrap();
           syncFromBill(bill);
-          if (selectedLineId === lineId) setSelectedLineId(null);
+          setLineShortageHints((prev) => {
+            if (!prev[lineId]) return prev;
+            const next = { ...prev };
+            delete next[lineId];
+            return next;
+          });
+          if (batchId) dispatch(clearBatchShortageAlert(batchId));
+          if (selectedLineId === lineId) {
+            setSelectedLineId(null);
+            setLineQtyDraft(null);
+          }
+          if (stockHintLineId === lineId) setStockHintLineId(null);
           void refetchTabs();
         }, 'Removing line…');
       } catch (e) {
         setError(getApiErrorMessage(e, 'Remove failed'));
       }
     },
-    [ensureBillId, removeLine, syncFromBill, refetchTabs, isEditable, selectedLineId, runBusy],
+    [
+      ensureBillId,
+      removeLine,
+      syncFromBill,
+      refetchTabs,
+      isEditable,
+      selectedLineId,
+      runBusy,
+      items,
+      dispatch,
+      stockHintLineId,
+    ],
   );
 
   const handleAddProduct = useCallback(
@@ -951,14 +976,42 @@ export function BillingScreen() {
   const [lineDiscMode, setLineDiscMode] = useState<'amount' | 'percent'>('amount');
   const [lineQtyDraft, setLineQtyDraft] = useState<number | null>(null);
 
+  const selectedQtyHint = selectedLineId ? lineShortageHints[selectedLineId] : undefined;
+
   useEffect(() => {
     if (!selectedLineId) {
       setLineQtyDraft(null);
       return;
     }
     const line = useBillingStore.getState().items.find((i) => i.id === selectedLineId);
-    setLineQtyDraft(line?.qty ?? null);
-  }, [selectedLineId]);
+    setLineQtyDraft(selectedQtyHint?.attemptedQty ?? line?.qty ?? null);
+  }, [selectedLineId, selectedQtyHint?.attemptedQty]);
+
+  /** Drop hints/alerts when line removed or batch no longer on this bill. */
+  useEffect(() => {
+    const lineIds = new Set(items.map((i) => i.id));
+    const batchOnBill = new Set(items.map((i) => i.batchId).filter(Boolean) as string[]);
+
+    setLineShortageHints((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of Object.keys(next)) {
+        if (!lineIds.has(id)) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+
+    for (const [batchId, alert] of Object.entries(batchShortageAlerts)) {
+      const lineGone = alert.lineId != null && !lineIds.has(alert.lineId);
+      const batchGone = !batchOnBill.has(batchId);
+      if (lineGone || (batchGone && alert.billId === billId)) {
+        dispatch(clearBatchShortageAlert(batchId));
+      }
+    }
+  }, [items, batchShortageAlerts, billId, dispatch]);
 
   const applyQtyShortageHint = useCallback(
     (
@@ -1057,10 +1110,14 @@ export function BillingScreen() {
             }
           }
           setStockHintLineId(lineId);
+          setLineQtyDraft(patch.qty!);
           try {
             const id = ensureBillId();
             const fresh = await fetchBill(id);
-            if (reqId === lineQtyApplyRef.current) syncFromBill(fresh);
+            if (reqId === lineQtyApplyRef.current) {
+              syncFromBill(fresh);
+              setLineQtyDraft(patch.qty!);
+            }
             void refetchTabs();
           } catch {
             /* keep line chips from last known state */
@@ -1367,6 +1424,7 @@ export function BillingScreen() {
                             item,
                             lineShortageHints,
                             item.batchId ? batchShortageAlerts[item.batchId] : undefined,
+                            { billId, lineId: item.id },
                           )
                             ? 'billing-line--shortage'
                             : '',
@@ -1385,13 +1443,17 @@ export function BillingScreen() {
                             <small className="d-block text-muted">{item.batchNumber}</small>
                           ) : null}
                         </td>
-                        <td className="text-right">{item.qty}</td>
+                        <td className="text-right">
+                          {lineShortageHints[item.id]?.attemptedQty ?? item.qty}
+                        </td>
                         <td>
                           <LineStockIndicators
+                            billId={billId}
+                            lineId={item.id}
                             batchId={item.batchId}
                             batchNumber={item.batchNumber}
                             productName={item.productName}
-                            lineQty={item.qty}
+                            lineQty={lineShortageHints[item.id]?.attemptedQty ?? item.qty}
                             availableQty={item.availableQty}
                             pendingQty={item.pendingQty}
                             stockQty={item.stockQty}
@@ -1454,7 +1516,8 @@ export function BillingScreen() {
                     id="line-qty"
                     inputRef={lineQtyRef}
                     className="form-control form-control-sm"
-                    value={lineQtyDraft ?? selectedLine.qty}
+                    lockDisplay={Boolean(selectedQtyHint)}
+                    value={lineQtyDraft ?? selectedQtyHint?.attemptedQty ?? selectedLine.qty}
                     onChange={(qty) => {
                       setLineQtyDraft(qty);
                       applyQtyShortageHint(selectedLineId, selectedLine, qty);

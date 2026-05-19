@@ -147,7 +147,7 @@ export class StockReservationService {
       stockQty,
       pendingQty,
       availableQty,
-      shortageQty,
+      shortageQty: shortageQty != null && shortageQty > 0.001 ? shortageQty : 0,
       attemptedQty: opts?.attemptedQty ?? opts?.lineQtyHint,
       billId: opts?.billId,
       lineId: opts?.lineId,

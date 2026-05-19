@@ -48,7 +48,7 @@ const stockSlice = createSlice({
           counterName: p.counterName,
           updatedAt: p.updatedAt ?? new Date().toISOString(),
         };
-      } else if (p.shortageQty === 0) {
+      } else {
         delete state.batchShortageAlerts[p.batchId];
       }
     },
