@@ -60,13 +60,16 @@ export function useBillingSocket(counterId?: string, onBillListChange?: () => vo
       if (payload.shortageQty == null || payload.shortageQty <= 0.001) {
         return;
       }
-      const isOtherCounter =
-        payload.counterId && counterId && payload.counterId !== counterId;
+      const isOtherCounter = Boolean(
+        payload.counterId && counterId && payload.counterId !== counterId,
+      );
       dispatch(
         setStockAlert({
+          kind: 'shortage',
+          foreignShortage: isOtherCounter,
           message: isOtherCounter
             ? `${payload.counterName ?? 'Another counter'}: short ${payload.shortageQty} on batch`
-            : `Short ${payload.shortageQty} on this bill (batch)`,
+            : `Stock short by ${payload.shortageQty} on this bill — check availability`,
           billId: payload.billId ?? '',
           batchId: payload.batchId,
         }),
@@ -97,6 +100,7 @@ export function useBillingSocket(counterId?: string, onBillListChange?: () => vo
       }
       dispatch(
         setStockAlert({
+          kind: 'commit_failed',
           message: payload.reason,
           billId: payload.billId,
           batchId: payload.batchId,

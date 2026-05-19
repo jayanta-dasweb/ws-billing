@@ -1,9 +1,14 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 
+export type StockAlertKind = 'shortage' | 'commit_failed';
+
 export interface StockAlert {
   message: string;
   billId: string;
   batchId: string;
+  kind: StockAlertKind;
+  /** Shortage raised on another counter's bill — show toast here, not only on origin. */
+  foreignShortage?: boolean;
 }
 
 interface WebsocketState {

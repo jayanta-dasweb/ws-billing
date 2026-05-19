@@ -249,12 +249,19 @@ export function BillingScreen() {
 
   useEffect(() => {
     if (!stockAlert) return;
-    const isOwnBill = stockAlert.billId === billId;
-    if (isOwnBill) {
-      setError(`Stock commit failed: ${stockAlert.message}`);
+    if (stockAlert.kind === 'commit_failed') {
+      if (stockAlert.billId === billId) {
+        setError(`Stock commit failed: ${stockAlert.message}`);
+      }
+    } else if (stockAlert.kind === 'shortage') {
+      if (stockAlert.foreignShortage) {
+        setMessage(stockAlert.message);
+      } else if (stockAlert.billId === billId) {
+        setMessage(stockAlert.message);
+      }
     }
     dispatch(setStockAlert(null));
-  }, [stockAlert, billId, dispatch]);
+  }, [stockAlert, billId, dispatch, setMessage, setError]);
 
   const isEditable = canEditBill(billId, status);
   const selectedLine = isEditable ? items.find((i) => i.id === selectedLineId) : undefined;
