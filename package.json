@@ -9,6 +9,7 @@
   "scripts": {
     "postinstall": "npm run build -w @billing/shared",
     "build:shared": "npm run build -w @billing/shared",
+    "clean:frontend": "npm run clean -w @billing/frontend",
     "dev": "npm run build -w @billing/shared && node apps/backend/scripts/kill-port.mjs 4000 && node apps/backend/scripts/kill-port.mjs 3000 && concurrently \"npm run dev -w @billing/backend\" \"npm run dev -w @billing/frontend\"",
     "dev:backend": "npm run build -w @billing/shared && npm run dev -w @billing/backend",
     "dev:frontend": "npm run dev -w @billing/frontend",

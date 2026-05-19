@@ -383,6 +383,7 @@ ws-billing/                          # Monorepo root (npm workspaces)
 | **`DATABASE_URL` not found (P1012)** | You ran `npx prisma …` without loading root `.env`. Use **repo root** `npm run prisma:*` or `npx dotenv -e ../../.env -- prisma …` from `apps/backend` |
 | **Empty login / no admin** | From repo root: `npm run prisma:seed` |
 | **`migrate dev` shadow DB error** | Use `npm run prisma:deploy` for setup, or set `SHADOW_DATABASE_URL` in `.env` |
+| **`_ProductSearchPanelShim is not defined`** | Stale Next cache or old `void _ProductSearchPanelShim` hack in `BillingScreen`. Stop dev, run `npm run clean -w @billing/frontend`, `git pull`, `npm run dev` from repo root |
 | **Customer 401 on `/auth/refresh`** | Normal if not staff; customer portal uses `/customer-auth/refresh` only |
 
 ---
