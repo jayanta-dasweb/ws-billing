@@ -57,13 +57,10 @@ export function useBillingSocket(counterId?: string, onBillListChange?: () => vo
     socket.on(WsEvent.STOCK_PENDING_UPDATED, (payload: StockPendingUpdatedPayload) => {
       dispatch(updateBatchStock(payload));
       dispatch(setLastEvent(WsEvent.STOCK_PENDING_UPDATED));
-      if (
-        payload.shortageQty != null &&
-        payload.shortageQty > 0.001 &&
-        payload.counterId &&
-        counterId &&
-        payload.counterId !== counterId
-      ) {
+      if (payload.shortageQty == null || payload.shortageQty <= 0.001) {
+        return;
+      }
+      if (payload.counterId && counterId && payload.counterId !== counterId) {
         dispatch(
           setStockAlert({
             message: `${payload.counterName ?? 'Another counter'}: short ${payload.shortageQty} on batch`,

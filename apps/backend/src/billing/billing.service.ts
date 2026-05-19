@@ -606,6 +606,10 @@ export class BillingService {
 
     const line = bill.items.find((i) => i.id === lineId);
     if (!line) throw new NotFoundException('Line not found');
+    const counter = await this.prisma.counter.findUnique({
+      where: { id: bill.counterId },
+      select: { name: true },
+    });
     if (line.batchId) {
       await this.reservations.release(
         line.batchId,
@@ -613,6 +617,7 @@ export class BillingService {
         line.productId,
         Number(line.qty),
         bill.counterId,
+        { lineId, counterName: counter?.name ?? 'Counter', lineQtyHint: 0 },
       );
     }
 
@@ -811,27 +816,50 @@ export class BillingService {
     const line = bill.items.find((i) => i.id === lineId);
     if (!line || !line.batchId) throw new NotFoundException('Line not found');
 
+    const counter = await this.prisma.counter.findUnique({
+      where: { id: bill.counterId },
+      select: { name: true },
+    });
+    const counterName = counter?.name ?? 'Counter';
+
     const oldQty = Number(line.qty);
     const newQty = dto.qty;
-    const delta = newQty - oldQty;
 
-    if (delta > 0) {
-      await this.reservations.reserve(
-        line.batchId,
-        billId,
-        line.productId,
-        delta,
-        bill.counterId,
-        newQty,
-      );
-    } else if (delta < 0) {
+    if (oldQty > 0.001) {
       await this.reservations.release(
         line.batchId,
         billId,
         line.productId,
-        -delta,
+        oldQty,
         bill.counterId,
+        { lineId, counterName, lineQtyHint: 0 },
       );
+    }
+
+    let reservedForLine = 0;
+    if (newQty > 0.001) {
+      try {
+        await this.reservations.reserve(
+          line.batchId,
+          billId,
+          line.productId,
+          newQty,
+          bill.counterId,
+          newQty,
+        );
+        reservedForLine = newQty;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!msg.includes('Insufficient stock')) throw e;
+        reservedForLine = await this.reservations.reserveAvailable(
+          line.batchId,
+          billId,
+          line.productId,
+          bill.counterId,
+          newQty,
+          { lineId, counterName },
+        );
+      }
     }
 
     const product = await this.prisma.product.findUnique({
@@ -857,6 +885,16 @@ export class BillingService {
     });
 
     await this.recalcBill(billId);
+
+    await this.reservations.publishLineStockState(line.batchId, line.productId, {
+      billId,
+      lineId,
+      counterId: bill.counterId,
+      counterName,
+      lineQty: newQty,
+      reservedForLine,
+    });
+
     if (Math.abs(oldQty - newQty) > 0.001) {
       await this.audit.activity({
         action: AuditAction.LINE_QTY_CHANGED,

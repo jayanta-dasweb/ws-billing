@@ -55,6 +55,13 @@ const stockSlice = createSlice({
     clearBatchShortageAlert(state, action: PayloadAction<string>) {
       delete state.batchShortageAlerts[action.payload];
     },
+    clearShortageAlertsForBill(state, action: PayloadAction<string | null | undefined>) {
+      const billId = action.payload;
+      if (!billId) return;
+      for (const [batchId, alert] of Object.entries(state.batchShortageAlerts)) {
+        if (alert.billId === billId) delete state.batchShortageAlerts[batchId];
+      }
+    },
     setBatchStocks(state, action: PayloadAction<StockPendingUpdatedPayload[]>) {
       for (const batch of action.payload) {
         state.batches[batch.batchId] = batch;
@@ -64,5 +71,10 @@ const stockSlice = createSlice({
   },
 });
 
-export const { updateBatchStock, setBatchStocks, clearBatchShortageAlert } = stockSlice.actions;
+export const {
+  updateBatchStock,
+  setBatchStocks,
+  clearBatchShortageAlert,
+  clearShortageAlertsForBill,
+} = stockSlice.actions;
 export default stockSlice.reducer;

@@ -73,6 +73,7 @@ export class StockReservationService {
     productId: string,
     qty: number,
     counterId?: string,
+    meta?: { lineId?: string; counterName?: string; lineQtyHint?: number },
   ) {
     const batch = await this.prisma.batchStock.update({
       where: { id: batchId },
@@ -80,8 +81,63 @@ export class StockReservationService {
     });
     await this.redis.adjustPendingQty(batchId, -qty);
     await this.redis.trackBillReservation(billId, batchId, -qty);
-    await this.broadcast(batchId, productId, batch, { billId, counterId });
+    await this.broadcast(batchId, productId, batch, {
+      billId,
+      counterId,
+      lineId: meta?.lineId,
+      counterName: meta?.counterName,
+      lineQtyHint: meta?.lineQtyHint ?? 0,
+      attemptedQty: 0,
+    });
     return batch;
+  }
+
+  /** Reserve up to free pool (used when full qty is not available). Returns units reserved. */
+  async reserveAvailable(
+    batchId: string,
+    billId: string,
+    productId: string,
+    counterId: string | undefined,
+    lineQtyHint: number,
+    meta?: { lineId?: string; counterName?: string },
+  ): Promise<number> {
+    const batch = await this.prisma.batchStock.findUnique({ where: { id: batchId } });
+    if (!batch) throw new NotFoundException('Batch not found');
+    const available = Math.max(
+      0,
+      Number(batch.stockQty) - Number(batch.pendingQty),
+    );
+    if (available <= 0.001) return 0;
+    await this.reserve(batchId, billId, productId, available, counterId, lineQtyHint);
+    return available;
+  }
+
+  /** After line qty change: broadcast pool + shortage (or clear shortage) to all counters. */
+  async publishLineStockState(
+    batchId: string,
+    productId: string,
+    opts: {
+      billId: string;
+      lineId: string;
+      counterId: string;
+      counterName?: string;
+      lineQty: number;
+      /** Units actually reserved for this bill line after the change. */
+      reservedForLine: number;
+    },
+  ) {
+    const batch = await this.prisma.batchStock.findUnique({ where: { id: batchId } });
+    if (!batch) throw new NotFoundException('Batch not found');
+    const shortageQty = Math.max(0, opts.lineQty - opts.reservedForLine);
+    await this.broadcast(batchId, productId, batch, {
+      billId: opts.billId,
+      lineId: opts.lineId,
+      counterId: opts.counterId,
+      counterName: opts.counterName,
+      lineQtyHint: opts.lineQty,
+      attemptedQty: opts.lineQty,
+      shortageQty,
+    });
   }
 
   async releaseAllForBill(
@@ -126,17 +182,17 @@ export class StockReservationService {
       lineId?: string;
       lineQtyHint?: number;
       attemptedQty?: number;
+      shortageQty?: number;
     },
   ) {
     const stockQty = Number(batch.stockQty);
     const pendingQty = Number(batch.pendingQty);
-    const poolFree = stockQty - pendingQty;
-    const availableQty = poolFree;
-    let shortageQty: number | undefined;
-    if (opts?.attemptedQty != null && opts.lineQtyHint != null) {
+    const availableQty = stockQty - pendingQty;
+    let shortageQty: number | undefined = opts?.shortageQty;
+    if (shortageQty == null && opts?.attemptedQty != null && opts.lineQtyHint != null) {
       const sellable = stockQty - pendingQty + opts.lineQtyHint;
       shortageQty = Math.max(0, opts.attemptedQty - sellable);
-    } else if (opts?.lineQtyHint != null) {
+    } else if (shortageQty == null && opts?.lineQtyHint != null) {
       const sellable = stockQty - pendingQty + opts.lineQtyHint;
       shortageQty = Math.max(0, opts.lineQtyHint - sellable);
     }
