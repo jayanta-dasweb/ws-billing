@@ -1,7 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CustomerType } from '@billing/shared';
+import {
+  CustomerType,
+  formatGstinInput,
+  formatPanInput,
+  normalizeIndianMobile,
+  validateCustomerFields,
+} from '@billing/shared';
+import { MobileInput } from '@/components/forms/MobileInput';
 import { useCreateCustomerMutation, useListCustomersQuery } from '@/services/api/mastersApi';
 import { useBillingStore } from '@/stores/billingStore';
 import { getApiErrorMessage } from '@/utils/api';
@@ -91,22 +98,25 @@ export function CustomerPanel({
   };
 
   const handleCreate = async () => {
-    if (!newName.trim()) {
-      setLocalError('Name is required');
+    const validationError = validateCustomerFields({
+      name: newName,
+      mobile: newMobile,
+      email: newEmail,
+      gstNumber: newGst,
+      panNumber: newPan,
+    });
+    if (validationError) {
+      setLocalError(validationError);
       return;
     }
-    const mobile = newMobile.trim();
-    if (!mobile) {
-      setLocalError('Mobile is required for billing');
-      return;
-    }
+    const mobile = normalizeIndianMobile(newMobile)!;
     setLocalError('');
     try {
       const row = await createCustomer({
         name: newName.trim(),
         mobile,
-        gstNumber: newGst.trim() || undefined,
-        panNumber: newPan.trim() || undefined,
+        gstNumber: formatGstinInput(newGst) || undefined,
+        panNumber: formatPanInput(newPan) || undefined,
         email: newEmail.trim() || undefined,
         billingAddress: newAddress.trim() || undefined,
         customerType: CustomerType.BUSINESS,
@@ -226,28 +236,30 @@ export function CustomerPanel({
               disabled={disabled || creating}
               onChange={(e) => setNewName(e.target.value)}
             />
-            <input
+            <MobileInput
               className="form-control form-control-sm mb-1"
-              placeholder="Mobile *"
               value={newMobile}
               disabled={disabled || creating}
-              onChange={(e) => setNewMobile(e.target.value)}
+              onChange={setNewMobile}
             />
             <input
               className="form-control form-control-sm mb-1"
-              placeholder="GSTIN"
+              placeholder="GSTIN (15 chars)"
               value={newGst}
               disabled={disabled || creating}
-              onChange={(e) => setNewGst(e.target.value)}
+              maxLength={15}
+              onChange={(e) => setNewGst(formatGstinInput(e.target.value))}
             />
             <input
               className="form-control form-control-sm mb-1"
-              placeholder="PAN"
+              placeholder="PAN (10 chars)"
               value={newPan}
               disabled={disabled || creating}
-              onChange={(e) => setNewPan(e.target.value)}
+              maxLength={10}
+              onChange={(e) => setNewPan(formatPanInput(e.target.value))}
             />
             <input
+              type="email"
               className="form-control form-control-sm mb-1"
               placeholder="Email"
               value={newEmail}

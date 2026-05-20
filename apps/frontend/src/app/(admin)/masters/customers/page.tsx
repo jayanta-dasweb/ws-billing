@@ -1,7 +1,17 @@
 'use client';
 
-import { CustomerType } from '@billing/shared';
+import {
+  CustomerType,
+  formatGstinInput,
+  formatPanInput,
+  normalizeIndianMobile,
+  validateIndianMobile,
+  validateOptionalEmail,
+  validateOptionalGstin,
+  validateOptionalPan,
+} from '@billing/shared';
 import { useState } from 'react';
+import { MobileInput } from '@/components/forms/MobileInput';
 import { FormModal } from '@/components/masters/FormModal';
 import { MasterListShell } from '@/components/masters/MasterListShell';
 import { StatusBadge, useMasterList } from '@/components/masters/useMasterList';
@@ -38,10 +48,12 @@ export default function CustomerMasterPage() {
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
   const [form, setForm] = useState<Partial<Customer>>(defaultForm());
+  const [saveError, setSaveError] = useState('');
 
   const openCreate = () => {
     setEditing(null);
     setForm(defaultForm());
+    setSaveError('');
     setModal(true);
   };
 
@@ -51,12 +63,48 @@ export default function CustomerMasterPage() {
       ...row,
       creditLimit: row.creditLimit ?? 0,
     });
+    setSaveError('');
     setModal(true);
   };
 
   const save = async () => {
-    if (!form.name?.trim()) return;
+    if (!form.name?.trim()) {
+      setSaveError('Name is required');
+      return;
+    }
+    if (form.mobile?.trim()) {
+      const mobileErr = validateIndianMobile(form.mobile);
+      if (mobileErr) {
+        setSaveError(mobileErr);
+        return;
+      }
+    }
+    const emailErr = validateOptionalEmail(form.email ?? '');
+    if (emailErr) {
+      setSaveError(emailErr);
+      return;
+    }
+    const gstErr = validateOptionalGstin(form.gstNumber ?? '');
+    if (gstErr) {
+      setSaveError(gstErr);
+      return;
+    }
+    const panErr = validateOptionalPan(form.panNumber ?? '');
+    if (panErr) {
+      setSaveError(panErr);
+      return;
+    }
+    setSaveError('');
     const body = pickFields<Partial<Customer>>(form as Record<string, unknown>, MASTER_WRITE_FIELDS.customer);
+    if (body.mobile && typeof body.mobile === 'string') {
+      body.mobile = normalizeIndianMobile(body.mobile) ?? body.mobile;
+    }
+    if (body.gstNumber && typeof body.gstNumber === 'string') {
+      body.gstNumber = formatGstinInput(body.gstNumber) || undefined;
+    }
+    if (body.panNumber && typeof body.panNumber === 'string') {
+      body.panNumber = formatPanInput(body.panNumber) || undefined;
+    }
     if (body.creditLimit !== undefined) {
       body.creditLimit = Number(body.creditLimit) || 0;
     }
@@ -139,10 +187,10 @@ export default function CustomerMasterPage() {
           </div>
           <div className="form-group col-md-6">
             <label>Mobile</label>
-            <input
+            <MobileInput
               className="form-control"
               value={form.mobile ?? ''}
-              onChange={(e) => setForm({ ...form, mobile: e.target.value })}
+              onChange={(mobile) => setForm({ ...form, mobile })}
             />
           </div>
         </div>
@@ -173,7 +221,8 @@ export default function CustomerMasterPage() {
             <input
               className="form-control"
               value={form.gstNumber ?? ''}
-              onChange={(e) => setForm({ ...form, gstNumber: e.target.value })}
+              maxLength={15}
+              onChange={(e) => setForm({ ...form, gstNumber: formatGstinInput(e.target.value) })}
             />
           </div>
           <div className="form-group col-md-6">
@@ -181,7 +230,8 @@ export default function CustomerMasterPage() {
             <input
               className="form-control"
               value={form.panNumber ?? ''}
-              onChange={(e) => setForm({ ...form, panNumber: e.target.value })}
+              maxLength={10}
+              onChange={(e) => setForm({ ...form, panNumber: formatPanInput(e.target.value) })}
             />
           </div>
         </div>
@@ -227,6 +277,7 @@ export default function CustomerMasterPage() {
             />
           </div>
         </div>
+        {saveError && <p className="text-danger small mb-0 mt-2">{saveError}</p>}
       </FormModal>
     </>
   );

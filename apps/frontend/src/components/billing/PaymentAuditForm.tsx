@@ -91,7 +91,7 @@ export function PaymentAuditForm({
       <div className={gridClass}>
         {field('pay-upi-txn', 'UPI transaction ID', {
           value: value.upiTxnId ?? '',
-          onChange: (upiTxnId) => set({ upiTxnId }),
+          onChange: (upiTxnId) => set({ upiTxnId: upiTxnId.replace(/[^A-Za-z0-9]/g, '').slice(0, 32) }),
           disabled,
           required: true,
           placeholder: '12-digit ref from customer SMS',

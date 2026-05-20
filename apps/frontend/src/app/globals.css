@@ -2660,6 +2660,23 @@ body {
   max-height: min(88dvh, 720px);
 }
 
+.billing-pay-modal__panel-busy {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  background: rgba(17, 26, 46, 0.88);
+  border-radius: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #e8eef7;
+  pointer-events: all;
+}
+
 .billing-pay-modal__panel {
   position: relative;
   z-index: 1;

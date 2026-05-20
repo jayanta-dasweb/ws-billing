@@ -104,9 +104,14 @@ export function validatePaymentAudit(
     case PaymentMode.CASH:
       return null;
 
-    case PaymentMode.UPI:
-      if (!trim(a.upiTxnId)) return 'UPI transaction ID is required';
+    case PaymentMode.UPI: {
+      const txn = trim(a.upiTxnId);
+      if (!txn) return 'UPI transaction ID is required';
+      if (txn.length < 6 || !/^[A-Za-z0-9]+$/.test(txn)) {
+        return 'UPI transaction ID must be at least 6 letters or numbers';
+      }
       return null;
+    }
 
     case PaymentMode.CARD: {
       if (!a.cardType) return 'Select credit or debit card';

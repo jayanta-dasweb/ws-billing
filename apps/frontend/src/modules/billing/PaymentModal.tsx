@@ -516,6 +516,12 @@ export function PaymentModal({
     <div className="billing-pay-modal" role="dialog" aria-modal="true" aria-labelledby="pay-modal-title">
       <div className="billing-pay-modal__backdrop" aria-hidden />
       <div ref={panelRef} className="billing-pay-modal__panel billing-pay-modal__panel--payment">
+        {busy && (
+          <div className="billing-pay-modal__panel-busy" role="status" aria-live="polite" aria-busy="true">
+            <div className="spinner-border text-light mb-2" role="presentation" />
+            <span>Processing…</span>
+          </div>
+        )}
         <header className="billing-pay-modal__header">
           <h2 id="pay-modal-title" className="billing-pay-modal__title">
             Payment

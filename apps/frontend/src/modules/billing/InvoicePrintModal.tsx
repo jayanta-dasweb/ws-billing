@@ -204,6 +204,12 @@ export function InvoicePrintModal({
         aria-hidden
       />
       <div ref={panelRef} className="billing-pay-modal__panel billing-inv-print-panel">
+        {working && (
+          <div className="billing-pay-modal__panel-busy" role="status" aria-live="polite" aria-busy="true">
+            <div className="spinner-border text-light mb-2" role="presentation" />
+            <span>Preparing PDF…</span>
+          </div>
+        )}
         <header className="billing-pay-modal__header">
           <h2 id="inv-print-title" className="billing-pay-modal__title">
             Invoice {detail.invoiceNo}

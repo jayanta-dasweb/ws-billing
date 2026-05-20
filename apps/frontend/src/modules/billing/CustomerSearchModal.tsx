@@ -1,7 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CustomerType } from '@billing/shared';
+import {
+  CustomerType,
+  formatGstinInput,
+  formatPanInput,
+  normalizeIndianMobile,
+  validateCustomerFields,
+} from '@billing/shared';
+import { MobileInput } from '@/components/forms/MobileInput';
 import { useCreateCustomerMutation, useListCustomersQuery, type Customer } from '@/services/api/mastersApi';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useTimedAlerts } from '@/hooks/useTimedAlerts';
@@ -153,22 +160,26 @@ export function CustomerSearchModal({
   }, [open, showNew, options, focusIdx, onSelect, onClose]);
 
   const handleCreate = async () => {
-    if (!newForm.name.trim()) {
-      setLocalError('Customer name is required');
+    const validationError = validateCustomerFields({
+      name: newForm.name,
+      mobile: newForm.mobile,
+      email: newForm.email,
+      gstNumber: newForm.gstNumber,
+      panNumber: newForm.panNumber,
+    });
+    if (validationError) {
+      setLocalError(validationError);
       return;
     }
-    if (!newForm.mobile.trim()) {
-      setLocalError('Mobile number is required for new customers');
-      return;
-    }
+    const mobile = normalizeIndianMobile(newForm.mobile)!;
     setLocalError('');
     try {
       const row = await createCustomer({
         name: newForm.name.trim(),
-        mobile: newForm.mobile.trim(),
+        mobile,
         email: newForm.email.trim() || undefined,
-        gstNumber: newForm.gstNumber.trim() || undefined,
-        panNumber: newForm.panNumber.trim() || undefined,
+        gstNumber: formatGstinInput(newForm.gstNumber) || undefined,
+        panNumber: formatPanInput(newForm.panNumber) || undefined,
         billingAddress: newForm.billingAddress.trim() || undefined,
         shippingAddress: newForm.shippingAddress.trim() || undefined,
         creditLimit: newForm.creditLimit ? Number(newForm.creditLimit) : 0,
@@ -275,12 +286,11 @@ export function CustomerSearchModal({
               </div>
               <div className="pharmacy-modal__field-row">
                 <label>Mobile *</label>
-                <input
+                <MobileInput
                   className="pharmacy-modal__input"
-                  placeholder="10-digit mobile"
                   value={newForm.mobile}
                   disabled={disabled || creating}
-                  onChange={(e) => setNewForm((f) => ({ ...f, mobile: e.target.value }))}
+                  onChange={(mobile) => setNewForm((f) => ({ ...f, mobile }))}
                 />
               </div>
               <div className="pharmacy-modal__field-row">
@@ -301,7 +311,8 @@ export function CustomerSearchModal({
                   placeholder="GST number if registered"
                   value={newForm.gstNumber}
                   disabled={disabled || creating}
-                  onChange={(e) => setNewForm((f) => ({ ...f, gstNumber: e.target.value }))}
+                  maxLength={15}
+                  onChange={(e) => setNewForm((f) => ({ ...f, gstNumber: formatGstinInput(e.target.value) }))}
                 />
               </div>
               <div className="pharmacy-modal__field-row">
@@ -311,7 +322,8 @@ export function CustomerSearchModal({
                   placeholder="PAN if available"
                   value={newForm.panNumber}
                   disabled={disabled || creating}
-                  onChange={(e) => setNewForm((f) => ({ ...f, panNumber: e.target.value }))}
+                  maxLength={10}
+                  onChange={(e) => setNewForm((f) => ({ ...f, panNumber: formatPanInput(e.target.value) }))}
                 />
               </div>
               <div className="pharmacy-modal__field-row">

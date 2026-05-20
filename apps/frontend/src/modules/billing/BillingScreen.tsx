@@ -166,7 +166,7 @@ export function BillingScreen() {
 
   const [fetchInvoice] = useLazyGetInvoiceByBillQuery();
 
-  const { message, error, setMessage, setError } = useTimedAlerts({ messageMs: 12000 });
+  const { error, setError } = useTimedAlerts({ messageMs: 12000 });
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
   const [stockHintLineId, setStockHintLineId] = useState<string | null>(null);
   const [busyMessage, setBusyMessage] = useState<string | null>(null);
@@ -177,6 +177,8 @@ export function BillingScreen() {
   const lastCompletedBillId = useRef<string | null>(null);
   const bootstrapRef = useRef<'idle' | 'loading' | 'done'>('idle');
   const stockSnapshotKeyRef = useRef('');
+  /** Bill we just created/switched to — tab list can lag; do not revert to tabs[0]. */
+  const pendingBillIdRef = useRef<string | null>(null);
   const [draftReady, setDraftReady] = useState(false);
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [batchPickProduct, setBatchPickProduct] = useState<CatalogProductDto | null>(null);
@@ -226,6 +228,9 @@ export function BillingScreen() {
     settingDiscount ||
     settingRoundOff ||
     transferring;
+
+  /** Workspace spinner — not when pay/print modals are open (they use their own overlay). */
+  const showWorkspaceBusy = isBusy && !payOpen && !printOpen && !reprintOpen;
 
   const busyLabel =
     busyMessage ??
@@ -289,7 +294,7 @@ export function BillingScreen() {
       }
     }
     dispatch(setStockAlert(null));
-  }, [stockAlert, billId, dispatch, setMessage, setError]);
+  }, [stockAlert, billId, dispatch, setError]);
 
   const isEditable = canEditBill(billId, status);
   const selectedLine = isEditable ? items.find((i) => i.id === selectedLineId) : undefined;
@@ -398,9 +403,14 @@ export function BillingScreen() {
 
   const startNewBill = useCallback(async () => {
     const bill = await createBill(isCashier ? undefined : { counterId }).unwrap();
+    pendingBillIdRef.current = bill.id;
     syncFromBill(bill);
     setSelectedLineId(null);
-    void refetchTabs();
+    const result = await refetchTabs();
+    const list = result.data ?? [];
+    if (list.some((t) => t.id === bill.id)) {
+      pendingBillIdRef.current = null;
+    }
     barcodeRef.current?.focus();
     return bill;
   }, [createBill, isCashier, counterId, syncFromBill, refetchTabs]);
@@ -440,7 +450,7 @@ export function BillingScreen() {
           const fresh = await fetchBill(billId);
           syncFromBill(fresh);
           if (!isOpenBillStatus(fresh.status)) {
-            setMessage('Bill was closed - use + New to start');
+            setError('Bill was closed - use + New to start');
           }
         } catch {
           clearBill();
@@ -453,15 +463,12 @@ export function BillingScreen() {
         try {
           const fresh = await fetchBill(draft.bill.id);
           syncFromBill(fresh);
-          if (isOpenBillStatus(fresh.status)) {
-            setMessage('Draft restored');
-          } else {
-            setMessage('Previous bill is no longer open');
+          if (!isOpenBillStatus(fresh.status)) {
+            setError('Previous bill is no longer open');
           }
         } catch {
           if (!navigator.onLine && isOpenBillStatus(draft.bill.status)) {
             syncFromBill(draft.bill);
-            setMessage('Restored offline draft - will sync when online');
           } else {
             clearBill();
           }
@@ -469,7 +476,7 @@ export function BillingScreen() {
       }
       setDraftReady(true);
     })();
-  }, [counterId, billId, syncFromBill, clearBill, setMessage]);
+  }, [counterId, billId, syncFromBill, clearBill, setError]);
 
   useEffect(() => {
     if (!draftReady || !billId || isOpenBillStatus(status)) return;
@@ -585,15 +592,22 @@ export function BillingScreen() {
               ? await resumeBill(targetId).unwrap()
               : await fetchBill(targetId);
 
+          pendingBillIdRef.current = targetId;
           syncFromBill(bill);
           if (!isOpenBillStatus(bill.status)) {
+            pendingBillIdRef.current = null;
             throw new Error('Bill is no longer open');
           }
           setSelectedLineId(null);
-          void refetchTabs();
+          const result = await refetchTabs();
+          const list = result.data ?? [];
+          if (list.some((t) => t.id === targetId)) {
+            pendingBillIdRef.current = null;
+          }
           barcodeRef.current?.focus();
         }, 'Opening bill...');
       } catch (e) {
+        if (pendingBillIdRef.current === targetId) pendingBillIdRef.current = null;
         setError(getApiErrorMessage(e, 'Could not open bill'));
       }
     },
@@ -612,12 +626,30 @@ export function BillingScreen() {
 
   useEffect(() => {
     if (!draftReady || !billId) return;
-    if (tabs.some((t) => t.id === billId)) return;
-    clearBill();
-    setSelectedLineId(null);
-    const next = tabs[0];
-    if (next) void switchToBill(next.id);
-  }, [draftReady, billId, tabs, clearBill, switchToBill]);
+    if (tabs.some((t) => t.id === billId)) {
+      if (pendingBillIdRef.current === billId) pendingBillIdRef.current = null;
+      return;
+    }
+    if (pendingBillIdRef.current === billId) return;
+
+    let cancelled = false;
+    void (async () => {
+      const result = await refetchTabs();
+      if (cancelled) return;
+      const list = result.data ?? tabs;
+      const activeId = useBillingStore.getState().billId;
+      if (!activeId || activeId !== billId) return;
+      if (list.some((t) => t.id === activeId)) return;
+      pendingBillIdRef.current = null;
+      clearBill();
+      setSelectedLineId(null);
+      const next = list[0];
+      if (next) void switchToBill(next.id);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [draftReady, billId, tabs, clearBill, switchToBill, refetchTabs]);
 
   const handleCloseTab = useCallback(
     async (tabId: string) => {
@@ -657,11 +689,6 @@ export function BillingScreen() {
           keepBillId: billId ?? undefined,
         }).unwrap();
         await refetchTabs();
-        if (result.cancelled === 0) {
-          setMessage('No empty bills to clear');
-        } else {
-          setMessage(`Cleared ${result.cancelled} empty bill${result.cancelled === 1 ? '' : 's'}`);
-        }
       }, 'Clearing empty bills...');
     } catch (e) {
       setError(getApiErrorMessage(e, 'Cleanup failed'));
@@ -698,7 +725,6 @@ export function BillingScreen() {
             }
           }
           void refetchTabs();
-          setMessage(`Bill sent to ${result.counterName} (${result.assignedToUsername})`);
         }, 'Transferring bill...');
       } catch (e) {
         setError(getApiErrorMessage(e, 'Could not transfer bill'));
@@ -736,16 +762,14 @@ export function BillingScreen() {
           await holdBill(id).unwrap();
           await refetchTabs();
           await startNewBill();
-          setMessage('Bill parked - open it from the orange tab above');
         } else {
           await startNewBill();
-          setMessage('New walk-in bill started');
         }
       }, items.length > 0 ? 'Parking bill...' : 'Starting new bill...');
     } catch (e) {
       setError(getApiErrorMessage(e, items.length > 0 ? 'Park failed' : 'Could not start new bill'));
     }
-  }, [items.length, isEditable, holdBill, startNewBill, refetchTabs, runBusy, setError, setMessage]);
+  }, [items.length, isEditable, holdBill, startNewBill, refetchTabs, runBusy, setError]);
 
   const handleScan = useCallback(
     async (barcode: string) => {
@@ -761,7 +785,6 @@ export function BillingScreen() {
             barcode: code,
             qty: 1,
           });
-          setMessage(`Offline - scan queued (${code})`);
           barcodeRef.current?.focus();
           return;
         }
@@ -773,7 +796,6 @@ export function BillingScreen() {
           if (resolved.kind === 'pick_batch') {
             setBatchPickProduct(resolved.product);
             setProductModalOpen(true);
-            setMessage(`Choose batch for ${resolved.product.name} (F8)`);
             return;
           }
 
@@ -816,7 +838,6 @@ export function BillingScreen() {
       runBusy,
       online,
       counterId,
-      setMessage,
       dismissIfBillClosed,
     ],
   );
@@ -872,11 +893,6 @@ export function BillingScreen() {
         const result = await completeBill({ billId: id, body, idempotencyKey }).unwrap();
         lastCompletedBillId.current = id;
         setPayOpen(false);
-        const change =
-          result.balanceReturn != null && result.balanceReturn > 0
-            ? ` | Change ₹${result.balanceReturn.toFixed(2)}`
-            : '';
-        setMessage(`Completed - ${result.invoiceNo ?? 'processing stock...'}${change}`);
         clearBill();
         await startNewBill();
         void refetchTabs();
@@ -1211,14 +1227,14 @@ export function BillingScreen() {
   }
 
   return (
-    <div className={`pharmacy-pos billing-pos${isBusy ? ' billing-pos--dimmed' : ''}`}>
+    <div className={`pharmacy-pos billing-pos${showWorkspaceBusy ? ' billing-pos--dimmed' : ''}`}>
       <WsConnectionStrip />
-      <BillingBusyOverlay active={isBusy} message={busyLabel} />
+      <BillingBusyOverlay active={showWorkspaceBusy} message={busyLabel} />
       <OfflineBanner
         online={online}
         pendingCount={pendingCount}
         syncing={syncing}
-        onSyncNow={() => void flushQueue().then((r) => setMessage(`Synced ${r.ok} action(s)`))}
+        onSyncNow={() => void flushQueue()}
       />
       <div className="billing-pos__shell">
         <BillingKeyboardHelp />
@@ -1235,12 +1251,9 @@ export function BillingScreen() {
             disabled={isBusy}
           />
 
-          {(message || error) && (
-            <div
-              className={`billing-pos__toast ${error ? 'billing-pos__toast--error' : 'billing-pos__toast--info'}`}
-            >
-              {error || message}
-              {invoiceNo && !error ? ` · ${invoiceNo}` : ''}
+          {error && (
+            <div className="billing-pos__toast billing-pos__toast--error" role="alert">
+              {error}
             </div>
           )}
 

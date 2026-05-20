@@ -12,3 +12,4 @@ export * from './stock';
 export * from './stock-events';
 export * from './websocket';
 export * from './audit';
+export * from './field-validation';
